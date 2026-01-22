@@ -340,7 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.template_text = "```\n<happcode>\n```";
+    ch.template_text = "\n<happcode>\n";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -944,7 +944,7 @@ serve(async (req) => {
           await clearState(userId);
           return new Response("ok");
         } else {
-          const defaultTemplate = "```\n<happcode>\n```";
+          const defaultTemplate = "\n<happcode>\n";
           user.channels.push({
             chatId: chChatId,
             username,
