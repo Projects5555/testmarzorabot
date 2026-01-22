@@ -62,7 +62,7 @@ const PLANS: Record<string, any> = {
 const PLAN_COSTS: Record<string, number> = {
   starter: 100,
   pro: 300,
-  premium: 1,
+  premium: 500,
 };
 
 const OUR_MARZBAN = {
@@ -753,12 +753,13 @@ serve(async (req) => {
         user.panels = user.panels || {};
         if (!user.panels[text]) {
           await sendMessage(chatId, "Panel not found. ❌");
+          await clearState(userId);
         } else {
           delete user.panels[text];
           await saveUser(user);
           await sendMessage(chatId, `Marzban panel ${text} deleted! 🗑️`);
+          await clearState(userId);
         }
-        await clearState(userId);
       } else if (state.state.startsWith("change_panel_")) {
         const field = state.state.slice(13);
         const { name } = state.data;
@@ -771,6 +772,7 @@ serve(async (req) => {
         if (field === "name") {
           if (user.panels[text]) {
             await sendMessage(chatId, "New name already exists. ❌");
+            await clearState(userId);
             return new Response("ok");
           }
           user.panels[text] = user.panels[name];
@@ -796,12 +798,14 @@ serve(async (req) => {
         const chatInfo = await getChat(username);
         if (!chatInfo) {
           await sendMessage(chatId, "Invalid channel. ❌");
+          await clearState(userId);
           return new Response("ok");
         }
         const chChatId = chatInfo.id.toString();
         const botIdLocal = await getBotId();
         if (!await isAdmin(chChatId, userId) || !await isAdmin(chChatId, botIdLocal)) {
           await sendMessage(chatId, "You or bot must be admin in the channel. ❌");
+          await clearState(userId);
           return new Response("ok");
         }
         const ownerEntry = await kv.get(["channel_owners", chChatId]);
@@ -814,6 +818,8 @@ serve(async (req) => {
         user.channels = user.channels || [];
         if (user.channels.some((c: any) => c.chatId === chChatId)) {
           await sendMessage(chatId, "Channel already added. ❌");
+          await clearState(userId);
+          return new Response("ok");
         } else {
           user.channels.push({
             chatId: chChatId,
@@ -827,21 +833,22 @@ serve(async (req) => {
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
+          await clearState(userId);
         }
-        await clearState(userId);
       } else if (state.state === "delete_channel") {
         let username = text.startsWith("@") ? text : `@${text}`;
         user.channels = user.channels || [];
         const ch = user.channels.find((c: any) => c.username === username);
         if (!ch) {
           await sendMessage(chatId, "Channel not found. ❌");
+          await clearState(userId);
         } else {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
+          await clearState(userId);
         }
-        await clearState(userId);
       } else if (state.state === "edit_time") {
         const times = text.split(",").map((t) => t.trim());
         const valid = times.every((t) => /^\d{1,2}:\d{2}$/.test(t));
@@ -866,8 +873,10 @@ serve(async (req) => {
           user.channels = channels;
           await saveUser(user);
           await sendMessage(chatId, "Posting times updated! ✅");
+          await clearState(userId);
+        } else {
+          await clearState(userId);
         }
-        await clearState(userId);
       } else if (state.state === "edit_post") {
         if (!text.includes("<happcode>")) {
           await sendMessage(chatId, "Must include <happcode>. Try again. ❌");
@@ -880,8 +889,10 @@ serve(async (req) => {
           user.channels = channels;
           await saveUser(user);
           await sendMessage(chatId, "Post template updated! ✅");
+          await clearState(userId);
+        } else {
+          await clearState(userId);
         }
-        await clearState(userId);
       } else if (state.state === "edit_reaction") {
         const channels = user.channels || [];
         const chIndex = channels.findIndex((c: any) => c.chatId === state.data.chatId);
@@ -890,8 +901,10 @@ serve(async (req) => {
           user.channels = channels;
           await saveUser(user);
           await sendMessage(chatId, "Reaction updated! ✅");
+          await clearState(userId);
+        } else {
+          await clearState(userId);
         }
-        await clearState(userId);
       }
       return new Response("ok");
     }
