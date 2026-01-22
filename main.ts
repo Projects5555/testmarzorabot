@@ -515,7 +515,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     offset = pos + happCode.length;
   }
   if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
-  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
+  if (!planConfig.noAds) postText += "\nJoin @MarzoraNews for more! 📢";
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
