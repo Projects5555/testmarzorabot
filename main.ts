@@ -60,9 +60,9 @@ const PLANS: Record<string, any> = {
 };
 
 const PLAN_COSTS: Record<string, number> = {
-  starter: 100,
-  pro: 300,
-  premium: 500,
+  starter: 1,
+  pro: 1,
+  premium: 1,
 };
 
 const PLAN_HIERARCHY: Record<string, number> = {
