@@ -944,7 +944,7 @@ serve(async (req) => {
           await clearState(userId);
           return new Response("ok");
         } else {
-          const defaultTemplate = "```\n<happcode>\n```";
+          const defaultTemplate = "\n<happcode>\n";
           user.channels.push({
             chatId: chChatId,
             username,
