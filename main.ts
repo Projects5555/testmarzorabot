@@ -85,9 +85,11 @@ async function getBotId() {
 }
 
 // -------------------- Helpers --------------------
-async function sendMessage(chatId: string, text: string, parseMode = "Markdown", replyMarkup: any = null) {
+async function sendMessage(chatId: string, text: string, parseMode: string | null = "Markdown", replyMarkup: any = null, entities: any[] | null = null) {
   try {
-    const body: any = { chat_id: chatId, text, parse_mode: parseMode };
+    const body: any = { chat_id: chatId, text };
+    if (parseMode) body.parse_mode = parseMode;
+    if (entities) body.entities = entities;
     if (replyMarkup) body.reply_markup = replyMarkup;
     const res = await fetch(`${API}/sendMessage`, {
       method: "POST",
@@ -409,10 +411,29 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   if (!subData) return;
   const happCode = await convertToHappCode(subData.link);
   if (!happCode) return;
-  let postText = ch.template.replace(/<happcode>/g, happCode);
+  let postText = ch.template_text;
+  let postEntities = ch.template_entities.map((e: any) => ({...e}));
+  const placeholder = "<happcode>";
+  const phLen = placeholder.length;
+  let offset = 0;
+  while (true) {
+    const pos = postText.indexOf(placeholder, offset);
+    if (pos === -1) break;
+    postText = postText.slice(0, pos) + happCode + postText.slice(pos + phLen);
+    const diff = happCode.length - phLen;
+    postEntities.forEach((e: any) => {
+      const end = e.offset + e.length;
+      if (e.offset >= pos + phLen) {
+        e.offset += diff;
+      } else if (end > pos && e.offset <= pos) {
+        e.length += diff;
+      }
+    });
+    offset = pos + happCode.length;
+  }
   if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
   if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
-  const sent = await sendMessage(ch.username, postText, "Markdown");
+  const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
   }
@@ -827,7 +848,8 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
-            template: "<happcode>",
+            template_text: "\n<happcode>\n",
+            template_entities: [{ type: "pre", offset: 0, length: 13 }],
             reaction: null,
             selected: false,
             last_post: 0,
@@ -889,7 +911,8 @@ serve(async (req) => {
         const channels = user.channels || [];
         const chIndex = channels.findIndex((c: any) => c.chatId === state.data.chatId);
         if (chIndex !== -1) {
-          channels[chIndex].template = text;
+          channels[chIndex].template_text = text;
+          channels[chIndex].template_entities = msg.entities || [];
           user.channels = channels;
           await saveUser(user);
           await sendMessage(chatId, "Post template updated! ✅");
