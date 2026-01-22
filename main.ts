@@ -707,7 +707,8 @@ serve(async (req) => {
       if (state.state === "top_up_amount") {
         const amount = parseInt(text);
         if (isNaN(amount) || amount <= 0) {
-          await sendMessage(chatId, "Invalid amount. Try again: ❌");
+          await sendMessage(chatId, "Invalid amount. ❌");
+          await clearState(userId);
           return new Response("ok");
         }
         const body = {
@@ -741,7 +742,7 @@ serve(async (req) => {
         const { name, sub_prefix, url, username } = state.data;
         user.panels = user.panels || {};
         if (user.panels[name]) {
-          await sendMessage(chatId, "Name already exists. Try again. ❌");
+          await sendMessage(chatId, "Name already exists. ❌");
           await clearState(userId);
           return new Response("ok");
         }
@@ -853,7 +854,8 @@ serve(async (req) => {
         const times = text.split(",").map((t) => t.trim());
         const valid = times.every((t) => /^\d{1,2}:\d{2}$/.test(t));
         if (!valid) {
-          await sendMessage(chatId, "Invalid format. Try again. ❌");
+          await sendMessage(chatId, "Invalid format. ❌");
+          await clearState(userId);
           return new Response("ok");
         }
         const mins = times.map((t) => {
@@ -862,7 +864,8 @@ serve(async (req) => {
         }).sort((a, b) => a - b);
         for (let i = 1; i < mins.length; i++) {
           if (mins[i] - mins[i - 1] < 60) {
-            await sendMessage(chatId, "Minimum 1 hour between posts. Try again. ❌");
+            await sendMessage(chatId, "Minimum 1 hour between posts. ❌");
+            await clearState(userId);
             return new Response("ok");
           }
         }
@@ -879,7 +882,8 @@ serve(async (req) => {
         }
       } else if (state.state === "edit_post") {
         if (!text.includes("<happcode>")) {
-          await sendMessage(chatId, "Must include <happcode>. Try again. ❌");
+          await sendMessage(chatId, "Must include <happcode>. ❌");
+          await clearState(userId);
           return new Response("ok");
         }
         const channels = user.channels || [];
