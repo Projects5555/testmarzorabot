@@ -340,7 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.template_text = "\n<happcode>\n";
+    ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -397,7 +397,7 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
   const activePlan = user.activePlan || "free";
   const subscribedPlan = user.subscribedPlan || "free";
   let expiryStr = "Never";
-  if (user.expiry) {
+  if (activePlan !== "free" && user.expiry) {
     const dt = new Date(user.expiry);
     const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
     expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
@@ -405,7 +405,7 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
   const text = `You are now ${activePlan.charAt(0).toUpperCase() + activePlan.slice(1)}\nExpires: ${expiryStr}`;
   const planOrder = ['free', 'starter', 'pro', 'premium'];
   const subscribedLevel = PLAN_HIERARCHY[subscribedPlan];
-  const keyboard = { inline_keyboard: [[]] };
+  const keyboard = { inline_keyboard: [] };
   for (const pName of planOrder) {
     let btnText = pName.charAt(0).toUpperCase() + pName.slice(1);
     let callback;
@@ -416,7 +416,7 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
       btnText = `Buy ${btnText}🛒`;
       callback = `confirm_buy:${pName}`;
     }
-    keyboard.inline_keyboard[0].push({ text: btnText, callback_data: callback });
+    keyboard.inline_keyboard.push([{ text: btnText, callback_data: callback }]);
   }
   if (msgId) {
     await editMessageText(chatId, msgId, text, "Markdown", keyboard);
@@ -944,7 +944,7 @@ serve(async (req) => {
           await clearState(userId);
           return new Response("ok");
         } else {
-          const defaultTemplate = "\n<happcode>\n";
+          const defaultTemplate = "```\n<happcode>\n```";
           user.channels.push({
             chatId: chChatId,
             username,
