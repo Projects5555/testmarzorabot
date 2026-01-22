@@ -60,9 +60,16 @@ const PLANS: Record<string, any> = {
 };
 
 const PLAN_COSTS: Record<string, number> = {
+  starter: 100,
+  pro: 300,
+  premium: 500,
+};
+
+const PLAN_HIERARCHY: Record<string, number> = {
+  free: 0,
   starter: 1,
-  pro: 1,
-  premium: 1,
+  pro: 2,
+  premium: 3,
 };
 
 const OUR_MARZBAN = {
@@ -295,7 +302,7 @@ async function convertToHappCode(subUrl: string): Promise<string | null> {
 // -------------------- User Data Helpers --------------------
 async function getUser(userId: number): Promise<any> {
   const entry = await kv.get(["users", userId]);
-  return entry.value || { id: userId, plan: "free", balance: 0, panels: {}, channels: [], first_name: "" };
+  return entry.value || { id: userId, subscribedPlan: "free", activePlan: "free", balance: 0, panels: {}, channels: [], first_name: "", expiry: null };
 }
 
 async function saveUser(user: any) {
@@ -316,13 +323,13 @@ async function clearState(userId: number) {
 }
 
 async function checkPlanExpiry(user: any) {
-  if (user.expiry && Date.now() > user.expiry && user.plan !== "free") {
-    const oldPlan = user.plan;
-    user.plan = "free";
+  if (user.expiry && Date.now() > user.expiry) {
+    user.subscribedPlan = "free";
+    user.activePlan = "free";
     user.expiry = null;
     resetSettings(user);
     await saveUser(user);
-    await sendMessage(user.id.toString(), `Your ${oldPlan} plan has expired! Reverted to Free. All settings reset to default. Please configure again. 📉`, "Markdown");
+    await sendMessage(user.id.toString(), `Your plan has expired! Reverted to Free. All settings reset to default. Please configure again. 📉`, "Markdown");
   }
   return user;
 }
@@ -337,6 +344,7 @@ function resetSettings(user: any) {
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
+  user.channels = channels;
 }
 
 // -------------------- Menu & Settings Helpers --------------------
@@ -345,11 +353,11 @@ async function showMenu(chatId: string, user: any) {
   const name = user.first_name || "User";
   const id = user.id;
   const balance = user.balance || 0;
-  const plan = user.plan || "free";
+  const activePlan = user.activePlan || "free";
   const text = `Hello \`${name}\` 👋\nID: \`${id}\` 🆔\nBalance: ${balance} ⭐️\nThis is very powerful tool to automate your VPN channels! 🚀`;
   const keyboard = {
     inline_keyboard: [
-      [{ text: `Plan: ${plan.charAt(0).toUpperCase() + plan.slice(1)} 📊`, callback_data: "plan_info" }],
+      [{ text: `Plan: ${activePlan.charAt(0).toUpperCase() + activePlan.slice(1)} 📊`, callback_data: "plan_info" }],
       [{ text: "Settings ⚙️", callback_data: "settings" }],
       [{ text: "Top up 💰", callback_data: "top_up" }],
       [{ text: "Pricing plans 💲", callback_data: "pricing" }],
@@ -374,7 +382,7 @@ function getFeaturesText(planName: string) {
   const config = PLANS[planName];
   let channelsText = `${config.maxChannels} channel`;
   if (config.maxChannels === Infinity) channelsText = "Unlimited channels";
-  if (config.maxChannels > 1) channelsText += "s";
+  if (config.maxChannels > 1 || config.maxChannels === Infinity) channelsText += "s";
   let text = `✅${channelsText}\n`;
   text += `${config.editTime ? "✅" : "🚫"}Edit posting time\n`;
   text += `${config.editPost ? "✅" : "🚫"}Edit post\n`;
@@ -386,25 +394,28 @@ function getFeaturesText(planName: string) {
 }
 
 async function showPricing(chatId: string, msgId: number | undefined, user: any) {
-  const plan = user.plan || "free";
+  const activePlan = user.activePlan || "free";
+  const subscribedPlan = user.subscribedPlan || "free";
   let expiryStr = "Never";
   if (user.expiry) {
     const dt = new Date(user.expiry);
     const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
     expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
   }
-  const text = `You are now ${plan.charAt(0).toUpperCase() + plan.slice(1)}\nExpires: ${expiryStr}`;
+  const text = `You are now ${activePlan.charAt(0).toUpperCase() + activePlan.slice(1)}\nExpires: ${expiryStr}`;
   const planOrder = ['free', 'starter', 'pro', 'premium'];
-  const accessible = new Set<string>(['free']);
-  if (['starter', 'pro', 'premium'].includes(plan)) accessible.add('starter');
-  if (['pro', 'premium'].includes(plan)) accessible.add('pro');
-  if (plan === 'premium') accessible.add('premium');
+  const subscribedLevel = PLAN_HIERARCHY[subscribedPlan];
   const keyboard = { inline_keyboard: [[]] };
   for (const pName of planOrder) {
     let btnText = pName.charAt(0).toUpperCase() + pName.slice(1);
-    let callback = accessible.has(pName) ? `select_plan:${pName}` : `confirm_buy:${pName}`;
-    if (!accessible.has(pName)) btnText = `Buy ${btnText}🛒`;
-    if (pName === plan) btnText += " ✅";
+    let callback;
+    if (PLAN_HIERARCHY[pName] <= subscribedLevel) {
+      callback = `select_plan:${pName}`;
+      if (pName === activePlan) btnText += " ✅";
+    } else {
+      btnText = `Buy ${btnText}🛒`;
+      callback = `confirm_buy:${pName}`;
+    }
     keyboard.inline_keyboard[0].push({ text: btnText, callback_data: callback });
   }
   if (msgId) {
@@ -434,7 +445,7 @@ setInterval(async () => {
       const userId = entry.key[1] as number;
       let user = await getUser(userId);
       user = await checkPlanExpiry(user);
-      const planConfig = PLANS[user.plan];
+      const planConfig = PLANS[user.activePlan];
       const channels = user.channels || [];
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i];
@@ -542,10 +553,11 @@ serve(async (req) => {
       let user = await getUser(userId);
       user.first_name = cb.from.first_name;
       user = await checkPlanExpiry(user);
-      const plan = user.plan || "free";
-      const planConfig = PLANS[plan];
+      const activePlan = user.activePlan || "free";
+      const subscribedPlan = user.subscribedPlan || "free";
+      const planConfig = PLANS[activePlan];
       if (data === "plan_info") {
-        await answerCallbackQuery(cb.id, `You are in ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan 📊`);
+        await answerCallbackQuery(cb.id, `You are in ${activePlan.charAt(0).toUpperCase() + activePlan.slice(1)} plan 📊`);
       } else if (data === "settings") {
         const text = getSettingsText(planConfig);
         const keyboard = {
@@ -562,15 +574,17 @@ serve(async (req) => {
         await showPricing(chatId, msgId, user);
       } else if (data.startsWith("select_plan:")) {
         const newPlan = data.slice(12);
-        if (newPlan === plan) {
+        if (newPlan === activePlan) {
           await answerCallbackQuery(cb.id, "Already on this plan.");
           return new Response("ok");
         }
-        user.plan = newPlan;
-        user.expiry = null;
-        resetSettings(user);
+        const oldActive = activePlan;
+        user.activePlan = newPlan;
+        if (newPlan !== oldActive) {
+          resetSettings(user);
+          await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
+        }
         await saveUser(user);
-        await sendMessage(chatId, "Plan changed to " + newPlan.charAt(0).toUpperCase() + newPlan.slice(1) + ". All settings changed to default please change it one more time 🔄");
         await answerCallbackQuery(cb.id);
         await showPricing(chatId, msgId, user);
       } else if (data.startsWith("confirm_buy:")) {
@@ -584,10 +598,12 @@ serve(async (req) => {
           return new Response("ok");
         }
         user.balance -= cost;
-        const wasPlan = user.plan;
-        user.plan = buyPlan;
+        const oldSubscribed = user.subscribedPlan;
+        const oldActive = user.activePlan;
+        user.subscribedPlan = buyPlan;
+        user.activePlan = buyPlan;
         user.expiry = Date.now() + 30 * 24 * 3600 * 1000;
-        if (wasPlan !== buyPlan) {
+        if (buyPlan !== oldActive) {
           resetSettings(user);
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
