@@ -60,9 +60,9 @@ const PLANS: Record<string, any> = {
 };
 
 const PLAN_COSTS: Record<string, number> = {
-  starter: 100,
-  pro: 300,
-  premium: 500,
+  starter: 1,
+  pro: 1,
+  premium: 1,
 };
 
 const OUR_MARZBAN = {
@@ -502,8 +502,8 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     });
     offset = pos + happCode.length;
   }
-  if (!planConfig.noWatermark) postText += "\n\nPowered by @MarzoraVPN 🚀";
-  if (!planConfig.noAds) postText += "\nJoin @MarzoraVPN for more! 📢";
+  if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
+  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
