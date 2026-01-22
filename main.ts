@@ -340,7 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.template_text = "\n<happcode>\n";
+    ch.template_text = "<happcode>";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -733,7 +733,7 @@ serve(async (req) => {
         };
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
         await answerCallbackQuery(cb.id);
-      } else if (data === "toggle_select:") {
+      } else if (data.startsWith("toggle_select:")) {
         const chatIdStr = data.slice(14);
         const channels = user.channels || [];
         const chIndex = channels.findIndex((c: any) => c.chatId === chatIdStr);
