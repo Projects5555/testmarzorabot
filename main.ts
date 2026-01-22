@@ -60,7 +60,7 @@ const PLANS: Record<string, any> = {
 };
 
 const PLAN_COSTS: Record<string, number> = {
-  starter: 1,
+  starter: 100,
   pro: 300,
   premium: 500,
 };
@@ -316,17 +316,32 @@ async function clearState(userId: number) {
 }
 
 async function checkPlanExpiry(user: any) {
-  if (user.expiry && Date.now() > user.expiry) {
+  if (user.expiry && Date.now() > user.expiry && user.plan !== "free") {
+    const oldPlan = user.plan;
     user.plan = "free";
     user.expiry = null;
+    resetSettings(user);
     await saveUser(user);
+    await sendMessage(user.id.toString(), `Your ${oldPlan} plan has expired! Reverted to Free. All settings reset to default. Please configure again. 📉`, "Markdown");
   }
   return user;
 }
 
+function resetSettings(user: any) {
+  const channels = user.channels || [];
+  for (const ch of channels) {
+    ch.selected = false;
+    ch.marzban = null;
+    ch.times = ["10:00"];
+    ch.template_text = "```\n<happcode>\n```";
+    ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
+    ch.reaction = null;
+  }
+}
+
 // -------------------- Menu & Settings Helpers --------------------
 async function showMenu(chatId: string, user: any) {
-  await checkPlanExpiry(user);
+  user = await checkPlanExpiry(user);
   const name = user.first_name || "User";
   const id = user.id;
   const balance = user.balance || 0;
@@ -353,6 +368,62 @@ function getSettingsText(planConfig: any) {
   text += `${planConfig.noAds ? "✅" : "🚫"}No Ads 📵\n`;
   text += `${planConfig.integrateOur ? "✅" : "🚫"}Integrate our marzban 🔗\n`;
   return text;
+}
+
+function getFeaturesText(planName: string) {
+  const config = PLANS[planName];
+  let channelsText = `${config.maxChannels} channel`;
+  if (config.maxChannels === Infinity) channelsText = "Unlimited channels";
+  if (config.maxChannels > 1) channelsText += "s";
+  let text = `✅${channelsText}\n`;
+  text += `${config.editTime ? "✅" : "🚫"}Edit posting time\n`;
+  text += `${config.editPost ? "✅" : "🚫"}Edit post\n`;
+  text += `${config.noWatermark ? "✅" : "🚫"}No watermark\n`;
+  text += `${config.editReaction ? "✅" : "🚫"}Edit reaction\n`;
+  text += `${config.noAds ? "✅" : "🚫"}No Ads\n`;
+  text += `${config.integrateOur ? "✅" : "🚫"}Integrate our marzban`;
+  return text;
+}
+
+async function showPricing(chatId: string, msgId: number | undefined, user: any) {
+  const plan = user.plan || "free";
+  let expiryStr = "Never";
+  if (user.expiry) {
+    const dt = new Date(user.expiry);
+    const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
+    expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
+  }
+  const text = `You are now ${plan.charAt(0).toUpperCase() + plan.slice(1)}\nExpires: ${expiryStr}`;
+  const planOrder = ['free', 'starter', 'pro', 'premium'];
+  const accessible = new Set<string>(['free']);
+  if (['starter', 'pro', 'premium'].includes(plan)) accessible.add('starter');
+  if (['pro', 'premium'].includes(plan)) accessible.add('pro');
+  if (plan === 'premium') accessible.add('premium');
+  const keyboard = { inline_keyboard: [[]] };
+  for (const pName of planOrder) {
+    let btnText = pName.charAt(0).toUpperCase() + pName.slice(1);
+    let callback = accessible.has(pName) ? `select_plan:${pName}` : `confirm_buy:${pName}`;
+    if (!accessible.has(pName)) btnText = `Buy ${btnText}🛒`;
+    if (pName === plan) btnText += " ✅";
+    keyboard.inline_keyboard[0].push({ text: btnText, callback_data: callback });
+  }
+  if (msgId) {
+    await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+  } else {
+    await sendMessage(chatId, text, "Markdown", keyboard);
+  }
+}
+
+async function showConfirmBuy(chatId: string, msgId: number, buyPlan: string) {
+  const cost = PLAN_COSTS[buyPlan];
+  const features = getFeaturesText(buyPlan);
+  const text = `${features}\nCosts ${cost}⭐️`;
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "Buy", callback_data: `buy_plan:${buyPlan}` }, { text: "Cancel", callback_data: "cancel_buy" }],
+    ],
+  };
+  await editMessageText(chatId, msgId, text, "Markdown", keyboard);
 }
 
 // -------------------- Scheduler --------------------
@@ -421,18 +492,18 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     if (pos === -1) break;
     postText = postText.slice(0, pos) + happCode + postText.slice(pos + phLen);
     const diff = happCode.length - phLen;
-    postEntities.forEach((e: any) => {
-      const end = e.offset + e.length;
+    postEntities = postEntities.map((e: any) => {
       if (e.offset >= pos + phLen) {
         e.offset += diff;
-      } else if (end > pos && e.offset <= pos) {
+      } else if (e.offset + e.length > pos) {
         e.length += diff;
       }
+      return e;
     });
     offset = pos + happCode.length;
   }
-  if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
-  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
+  if (!planConfig.noWatermark) postText += "\n\nPowered by @MarzoraVPN 🚀";
+  if (!planConfig.noAds) postText += "\nJoin @MarzoraVPN for more! 📢";
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
@@ -488,29 +559,43 @@ serve(async (req) => {
         await setState(userId, "top_up_amount");
         await editMessageText(chatId, msgId, "How many ⭐️ you want to top up? 🔢");
       } else if (data === "pricing") {
-        const text = "Pricing plans 💲:\nStarter: 100 ⭐️ (3 channels, edit time) 📈\nPro: 300 ⭐️ (10 channels, full edits, no watermark/ads) 🚀\nPremium: 500 ⭐️ (Unlimited, integrate our Marzban) 🌟\nEach lasts 1 month.";
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: "Buy Starter 🛒", callback_data: "buy_starter" }],
-            [{ text: "Buy Pro 🛒", callback_data: "buy_pro" }],
-            [{ text: "Buy Premium 🛒", callback_data: "buy_premium" }],
-          ],
-        };
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data.startsWith("buy_")) {
-        const buyPlan = data.slice(4);
+        await showPricing(chatId, msgId, user);
+      } else if (data.startsWith("select_plan:")) {
+        const newPlan = data.slice(12);
+        if (newPlan === plan) {
+          await answerCallbackQuery(cb.id, "Already on this plan.");
+          return new Response("ok");
+        }
+        user.plan = newPlan;
+        user.expiry = null;
+        resetSettings(user);
+        await saveUser(user);
+        await sendMessage(chatId, "Plan changed to " + newPlan.charAt(0).toUpperCase() + newPlan.slice(1) + ". All settings changed to default please change it one more time 🔄");
+        await answerCallbackQuery(cb.id);
+        await showPricing(chatId, msgId, user);
+      } else if (data.startsWith("confirm_buy:")) {
+        const buyPlan = data.slice(12);
+        await showConfirmBuy(chatId, msgId, buyPlan);
+      } else if (data.startsWith("buy_plan:")) {
+        const buyPlan = data.slice(9);
         const cost = PLAN_COSTS[buyPlan];
-        if (!cost) return new Response("ok");
         if (user.balance < cost) {
-          await answerCallbackQuery(cb.id, "Not enough ⭐️. Top up first! 💰");
+          await answerCallbackQuery(cb.id, "Not enough ⭐️.");
           return new Response("ok");
         }
         user.balance -= cost;
+        const wasPlan = user.plan;
         user.plan = buyPlan;
-        user.expiry = Date.now() + 30 * 24 * 3600000;
+        user.expiry = Date.now() + 30 * 24 * 3600 * 1000;
+        if (wasPlan !== buyPlan) {
+          resetSettings(user);
+          await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
+        }
         await saveUser(user);
-        await answerCallbackQuery(cb.id, `Successfully purchased ${buyPlan.charAt(0).toUpperCase() + buyPlan.slice(1)} plan! 🎉`);
+        await answerCallbackQuery(cb.id, "Purchased!");
         await showMenu(chatId, user);
+      } else if (data === "cancel_buy") {
+        await showPricing(chatId, msgId, user);
       } else if (data === "marzban") {
         const text = "Here you can manage your Marzban panels! 🛠️";
         const keyboard = {
@@ -843,13 +928,14 @@ serve(async (req) => {
           await clearState(userId);
           return new Response("ok");
         } else {
+          const defaultTemplate = "```\n<happcode>\n```";
           user.channels.push({
             chatId: chChatId,
             username,
             marzban: null,
             times: ["10:00"],
-            template_text: "\n<happcode>\n",
-            template_entities: [{ type: "pre", offset: 0, length: 13 }],
+            template_text: defaultTemplate,
+            template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
             selected: false,
             last_post: 0,
