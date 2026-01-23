@@ -690,9 +690,12 @@ serve(async (req) => {
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
         await answerCallbackQuery(cb.id);
       } else if (data.startsWith("change_panel_")) {
-        const [_, field, name] = data.split(":");
-        await setState(userId, `change_panel_${field.slice(12)}`, { name });
-        await editMessageText(chatId, msgId, `Enter new ${field.slice(12)} for ${name}: 📝`);
+        const parts = data.split(":");
+        const fieldStr = parts[0];
+        const name = parts[1];
+        const field = fieldStr.split("_").pop();
+        await setState(userId, `change_panel_${field}`, { name });
+        await editMessageText(chatId, msgId, `Enter new ${field} for ${name}: 📝`);
       } else if (data === "channels") {
         const text = "Here you can manage your channels! 📢";
         const keyboard = {
