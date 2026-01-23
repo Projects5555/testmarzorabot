@@ -340,6 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
+    ch.last_posted_hhmm = null;
     ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
@@ -456,9 +457,9 @@ setInterval(async () => {
         if (hour >= 24) hour -= 24;
         const min = current.getUTCMinutes();
         const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-        if (ch.times.includes(hhmm) && (!ch.last_post || Date.now() - ch.last_post > 30000)) {
+        if (ch.times.includes(hhmm) && ch.last_posted_hhmm !== hhmm) {
           await postToChannel(userId, ch, planConfig, user);
-          ch.last_post = Date.now();
+          ch.last_posted_hhmm = hhmm;
           user.channels[i] = ch;
           await saveUser(user);
         }
@@ -1033,6 +1034,7 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
+            last_posted_hhmm: null,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
