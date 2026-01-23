@@ -228,7 +228,7 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
   const token = await getMarzbanToken(url, adminUser, adminPass);
   if (!token) return null;
   const username = sub_prefix + Math.random().toString(36).substring(2, 8);
-  await removeMarzbanUser(url, token, username);
+  await removeMarzbanUser(url, token, username); // Clean if exists
   const headers = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -342,6 +342,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
+    ch.last_posted_hhmm = null;
     ch.template_text = "<happcode>";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
@@ -480,121 +481,79 @@ setInterval(async () => {
       user = await checkPlanExpiry(user);
       const planConfig = PLANS[user.activePlan];
       const channels = user.channels || [];
-      let userChanged = false;
-
-      // Calculate current time in UTC+5
-      const current = new Date();
-      let hour = current.getUTCHours() + 5;
-      if (hour >= 24) hour -= 24;
-      const min = current.getUTCMinutes();
-      const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-
-      // Collect channels that should post now (with last_posted check)
-      const postingChannels: any[] = [];
-      for (const ch of channels) {
-        if (!ch.selected || !ch.marzban || !ch.times.includes(hhmm)) continue;
-        const key = ["channel_last_posted", ch.chatId];
-        const entry = await kv.get(key);
-        if (entry.value === hhmm) continue;
-        postingChannels.push(ch);
-      }
-
-      if (postingChannels.length === 0) continue;
-
-      // Group channels by marzban key (create one subscription per unique marzban)
-      const marzbanGroups: Record<string, any[]> = {};
-      for (const ch of postingChannels) {
-        const mkey = ch.marzban;
-        if (!marzbanGroups[mkey]) marzbanGroups[mkey] = [];
-        marzbanGroups[mkey].push(ch);
-      }
-
-      const botIdLocal = await getBotId();
-
-      // Process each marzban group
-      for (const [marzbanKey, groupChannels] of Object.entries(marzbanGroups)) {
-        let panel: any = null;
-        if (marzbanKey === "our_marzban") {
-          panel = await getOurMarzban();
-        } else if (user.panels && user.panels[marzbanKey]) {
-          panel = user.panels[marzbanKey];
+      for (let i = 0; i < channels.length; i++) {
+        const ch = channels[i];
+        if (!ch.selected || !ch.marzban) continue;
+        const current = new Date();
+        let hour = current.getUTCHours() + 5;
+        if (hour >= 24) hour -= 24;
+        const min = current.getUTCMinutes();
+        const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
+        if (ch.times.includes(hhmm) && ch.last_posted_hhmm !== hhmm) {
+          await postToChannel(userId, ch, planConfig, user);
+          ch.last_posted_hhmm = hhmm;
+          user.channels[i] = ch;
+          await saveUser(user);
         }
-        if (!panel) continue;
-
-        // Create ONE Marzban subscription for this marzban + time slot
-        const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: 0 }, panel.sub_prefix);
-        if (!subData) continue;
-
-        const happCode = await convertToHappCode(subData.link);
-        if (!happCode) continue;
-
-        // Post the SAME happCode to all channels in this group
-        for (const ch of groupChannels) {
-          // Admin checks
-          if (!await isAdmin(ch.chatId, userId)) {
-            user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
-            await sendMessage(userId.toString(), `Channel ${ch.username} deleted because you are not admin anymore. ❌`);
-            userChanged = true;
-            continue;
-          }
-          if (!await isAdmin(ch.chatId, botIdLocal)) {
-            user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
-            await sendMessage(userId.toString(), `Channel ${ch.username} deleted because bot is not admin. ❌`);
-            userChanged = true;
-            continue;
-          }
-
-          // Update channel username if changed
-          const chatInfo = await getChat(ch.chatId);
-          if (chatInfo && chatInfo.username && `@${chatInfo.username}` !== ch.username) {
-            ch.username = `@${chatInfo.username}`;
-            await kv.set(["channel_owners", ch.chatId], userId);
-            userChanged = true;
-          }
-
-          // Build post with happCode replacement
-          let postText = ch.template_text;
-          let postEntities = ch.template_entities ? ch.template_entities.map((e: any) => ({ ...e })) : [];
-          const placeholder = "<happcode>";
-          let offset = 0;
-          while (true) {
-            const pos = postText.indexOf(placeholder, offset);
-            if (pos === -1) break;
-            postText = postText.slice(0, pos) + happCode + postText.slice(pos + placeholder.length);
-            const diff = happCode.length - placeholder.length;
-            postEntities = postEntities.map((e: any) => {
-              if (e.offset >= pos + placeholder.length) {
-                e.offset += diff;
-              } else if (e.offset + e.length > pos) {
-                e.length += diff;
-              }
-              return e;
-            });
-            offset = pos + happCode.length;
-          }
-
-          if (!planConfig.noWatermark) postText += "\n\nPowered by @MarzoraBot 🚀";
-          if (!planConfig.noAds) postText += "\nJoin @MarzoraNews for more! 📢";
-
-          const sent = await sendMessage(ch.username, postText, null, null, postEntities);
-          if (sent && ch.reaction && planConfig.editReaction) {
-            await setReaction(ch.username, sent.message_id, ch.reaction);
-          }
-
-          // Mark as posted
-          const key = ["channel_last_posted", ch.chatId];
-          await kv.set(key, hhmm);
-        }
-      }
-
-      if (userChanged) {
-        await saveUser(user);
       }
     }
   } catch (err) {
     console.error("Scheduler error:", err);
   }
 }, 60000);
+
+async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
+  const botIdLocal = await getBotId();
+  if (!await isAdmin(ch.chatId, userId)) {
+    user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
+    await saveUser(user);
+    await sendMessage(userId.toString(), `Channel ${ch.username} deleted because you are not admin anymore. ❌`);
+    return;
+  }
+  if (!await isAdmin(ch.chatId, botIdLocal)) {
+    user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
+    await saveUser(user);
+    await sendMessage(userId.toString(), `Channel ${ch.username} deleted because bot is not admin. ❌`);
+    return;
+  }
+  const chatInfo = await getChat(ch.chatId);
+  if (chatInfo && chatInfo.username !== ch.username) {
+    ch.username = `@${chatInfo.username}`;
+    await kv.set(["channel_owners", ch.chatId], userId);
+  }
+  let panel = ch.marzban === "our_marzban" ? await getOurMarzban() : user.panels[ch.marzban];
+  if (!panel) return;
+  const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: 0 }, panel.sub_prefix);
+  if (!subData) return;
+  const happCode = await convertToHappCode(subData.link);
+  if (!happCode) return;
+  let postText = ch.template_text;
+  let postEntities = ch.template_entities.map((e: any) => ({...e}));
+  const placeholder = "<happcode>";
+  const phLen = placeholder.length;
+  let offset = 0;
+  while (true) {
+    const pos = postText.indexOf(placeholder, offset);
+    if (pos === -1) break;
+    postText = postText.slice(0, pos) + happCode + postText.slice(pos + phLen);
+    const diff = happCode.length - phLen;
+    postEntities = postEntities.map((e: any) => {
+      if (e.offset >= pos + phLen) {
+        e.offset += diff;
+      } else if (e.offset + e.length > pos) {
+        e.length += diff;
+      }
+      return e;
+    });
+    offset = pos + happCode.length;
+  }
+  if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
+  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
+  const sent = await sendMessage(ch.username, postText, null, null, postEntities);
+  if (sent && ch.reaction && planConfig.editReaction) {
+    await setReaction(ch.username, sent.message_id, ch.reaction);
+  }
+}
 
 // -------------------- Webhook Handler --------------------
 serve(async (req) => {
@@ -914,6 +873,7 @@ serve(async (req) => {
         user.channels = channels;
         await saveUser(user);
         await answerCallbackQuery(cb.id, "Connected to our Marzban! ✅");
+        // Refresh connect menu
         const text = "Select Marzban panel to connect to this channel! 🔗";
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Our marzban ✅`, callback_data: `connect_our:${chatIdStr}` }]);
@@ -932,6 +892,7 @@ serve(async (req) => {
         user.channels = channels;
         await saveUser(user);
         await answerCallbackQuery(cb.id, `Connected to ${name}! ✅`);
+        // Refresh
         const text = "Select Marzban panel to connect to this channel! 🔗";
         const keyboard = { inline_keyboard: [] };
         if (planConfig.integrateOur) {
@@ -1139,10 +1100,12 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
+            last_posted_hhmm: null,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
             selected: false,
+            last_post: 0,
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
@@ -1158,7 +1121,6 @@ serve(async (req) => {
         } else {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
-          await kv.delete(["channel_last_posted", ch.chatId]);
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
           await clearState(userId);
@@ -1228,7 +1190,7 @@ serve(async (req) => {
         }
       } else if (state.state.startsWith("admin_")) {
         if (username !== "Masakoff") {
-          await sendMessage(chatId, "You are not admin. ❌");
+          await sendMessage(chatId, ""); //You are not admin. ❌
           await clearState(userId);
           return new Response("ok");
         }
@@ -1298,9 +1260,9 @@ serve(async (req) => {
           if (targetUser.expiry) {
             const dt = new Date(targetUser.expiry);
             const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
-            expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
+            expiryStr = utc5.toLocaleString('en-GB', { timeZone: 'UTC' }).replace(',', '');
           }
-          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}`;
+          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr} (UTC+5)`;
           await sendMessage(chatId, plansText);
           await setState(userId, "admin_modify_plans_expiry", { targetId });
           await sendMessage(chatId, "Send new expiry in format DD.MM.YYYY HH:MM (UTC+5) or 'never' to remove:");
@@ -1367,11 +1329,12 @@ serve(async (req) => {
       return new Response("ok");
     }
     if (text === "/start") {
+      await showMenu(chatId, user);
     } else if (text === "/adminpanel") {
       if (username === "Masakoff") {
         await showAdminPanel(chatId);
       } else {
-        await sendMessage(chatId, "You are not admin. ❌");
+        await sendMessage(chatId, ""); //You are not admin. ❌
       }
     }
   } catch (err) {
