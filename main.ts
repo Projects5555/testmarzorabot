@@ -340,7 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.template_text = "<happcode>";
+    ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -418,7 +418,6 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
     }
     keyboard.inline_keyboard.push([{ text: btnText, callback_data: callback }]);
   }
-  keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_menu" }]);
   if (msgId) {
     await editMessageText(chatId, msgId, text, "Markdown", keyboard);
   } else {
@@ -515,7 +514,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     offset = pos + happCode.length;
   }
   if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
-  if (!planConfig.noAds) postText += "\nJoin @MarzoraNews for more! 📢";
+  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
@@ -565,7 +564,6 @@ serve(async (req) => {
           inline_keyboard: [
             [{ text: "Marzban 🛠️", callback_data: "marzban" }],
             [{ text: "Channels 📢", callback_data: "channels" }],
-            [{ text: "Back", callback_data: "back_menu" }],
           ],
         };
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
@@ -614,9 +612,6 @@ serve(async (req) => {
         await showMenu(chatId, user);
       } else if (data === "cancel_buy") {
         await showPricing(chatId, msgId, user);
-      } else if (data === "back_menu") {
-        await showMenu(chatId, user);
-        await answerCallbackQuery(cb.id);
       } else if (data === "marzban") {
         const text = "Here you can manage your Marzban panels! 🛠️";
         const keyboard = {
@@ -624,21 +619,9 @@ serve(async (req) => {
             [{ text: "Manage 🔧", callback_data: "manage_marzban" }],
             [{ text: "Add Marzban ➕", callback_data: "add_marzban" }],
             [{ text: "Delete Marzban ➖", callback_data: "delete_marzban" }],
-            [{ text: "Back", callback_data: "back_settings" }],
           ],
         };
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data === "back_settings") {
-        const text = getSettingsText(planConfig);
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: "Marzban 🛠️", callback_data: "marzban" }],
-            [{ text: "Channels 📢", callback_data: "channels" }],
-            [{ text: "Back", callback_data: "back_menu" }],
-          ],
-        };
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-        await answerCallbackQuery(cb.id);
       } else if (data === "add_marzban") {
         await setState(userId, "add_marzban_name");
         await editMessageText(chatId, msgId, "Enter name for the Marzban panel: 📝");
@@ -653,20 +636,7 @@ serve(async (req) => {
         }
         const text = "Select Marzban panel to manage! 🔧";
         const keyboard = { inline_keyboard: panels.map((name) => [{ text: name, callback_data: `manage_panel:${name}` }]) };
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_marzban" }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data === "back_marzban") {
-        const text = "Here you can manage your Marzban panels! 🛠️";
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: "Manage 🔧", callback_data: "manage_marzban" }],
-            [{ text: "Add Marzban ➕", callback_data: "add_marzban" }],
-            [{ text: "Delete Marzban ➖", callback_data: "delete_marzban" }],
-            [{ text: "Back", callback_data: "back_settings" }],
-          ],
-        };
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-        await answerCallbackQuery(cb.id);
       } else if (data.startsWith("manage_panel:")) {
         const name = data.slice(13);
         const text = `Here you can change ${name} settings! ⚙️`;
@@ -677,17 +647,9 @@ serve(async (req) => {
             [{ text: "Change URL 🌐", callback_data: `change_panel_url:${name}` }],
             [{ text: "Change username 👤", callback_data: `change_panel_username:${name}` }],
             [{ text: "Change password 🔑", callback_data: `change_panel_password:${name}` }],
-            [{ text: "Back", callback_data: "back_manage_marzban" }],
           ],
         };
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data === "back_manage_marzban") {
-        const panels = Object.keys(user.panels || {});
-        const text = panels.length === 0 ? "No Marzban panels added yet. ❌" : "Select Marzban panel to manage! 🔧";
-        const keyboard = { inline_keyboard: panels.map((name) => [{ text: name, callback_data: `manage_panel:${name}` }]) };
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_marzban" }]);
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-        await answerCallbackQuery(cb.id);
       } else if (data.startsWith("change_panel_")) {
         const [_, field, name] = data.split(":");
         await setState(userId, `change_panel_${field.slice(12)}`, { name });
@@ -700,7 +662,6 @@ serve(async (req) => {
             [{ text: "Add channel ➕", callback_data: "add_channel" }],
             [{ text: "Delete channel ➖", callback_data: "delete_channel" }],
             [{ text: "Select channel ✅", callback_data: "select_channel" }],
-            [{ text: "Back", callback_data: "back_settings" }],
           ],
         };
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
@@ -718,21 +679,7 @@ serve(async (req) => {
         }
         const text = "Select channels where bot will work! ✅";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: `${ch.username} ${ch.selected ? "✅" : ""}`, callback_data: `toggle_select:${ch.chatId}` }]) };
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data === "back_channels") {
-        const text = "Here you can manage your channels! 📢";
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: "Manage 🔧", callback_data: "manage_channel" }],
-            [{ text: "Add channel ➕", callback_data: "add_channel" }],
-            [{ text: "Delete channel ➖", callback_data: "delete_channel" }],
-            [{ text: "Select channel ✅", callback_data: "select_channel" }],
-            [{ text: "Back", callback_data: "back_settings" }],
-          ],
-        };
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-        await answerCallbackQuery(cb.id);
       } else if (data.startsWith("toggle_select:")) {
         const chatIdStr = data.slice(14);
         const channels = user.channels || [];
@@ -752,7 +699,6 @@ serve(async (req) => {
         await saveUser(user);
         const text = "Select channels where bot will work! ✅";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: `${ch.username} ${ch.selected ? "✅" : ""}`, callback_data: `toggle_select:${ch.chatId}` }]) };
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
         await answerCallbackQuery(cb.id);
       } else if (data === "manage_channel") {
@@ -763,15 +709,7 @@ serve(async (req) => {
         }
         const text = "Select channel to manage! 🔧";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: ch.username, callback_data: `manage_ch:${ch.chatId}` }]) };
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data === "back_manage_channel") {
-        const channels = user.channels || [];
-        const text = channels.length === 0 ? "No channels added yet. ❌" : "Select channel to manage! 🔧";
-        const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: ch.username, callback_data: `manage_ch:${ch.chatId}` }]) };
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-        await answerCallbackQuery(cb.id);
       } else if (data.startsWith("manage_ch:")) {
         const chatIdStr = data.slice(10);
         const channels = user.channels || [];
@@ -786,7 +724,6 @@ serve(async (req) => {
         keyboard.inline_keyboard.push([{ text: postText, callback_data: `edit_post:${ch.chatId}` }]);
         const reactionText = planConfig.editReaction ? "Edit reaction ❤️" : "🔒Edit reaction🔒";
         keyboard.inline_keyboard.push([{ text: reactionText, callback_data: `edit_reaction:${ch.chatId}` }]);
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_manage_channel" }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("connect_marzban:")) {
         const chatIdStr = data.slice(16);
@@ -804,25 +741,7 @@ serve(async (req) => {
         panels.forEach(([name]) => {
           keyboard.inline_keyboard.push([{ text: `${name} ${ch.marzban === name ? "✅" : ""}`, callback_data: `connect_panel:${ch.chatId}:${name}` }]);
         });
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `back_manage_ch:${ch.chatId}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-      } else if (data.startsWith("back_manage_ch:")) {
-        const chatIdStr = data.slice(15);
-        const channels = user.channels || [];
-        const ch = channels.find((c: any) => c.chatId === chatIdStr);
-        if (!ch) return new Response("ok");
-        const text = `Here you can change ${ch.username} settings! ⚙️`;
-        const keyboard = { inline_keyboard: [] };
-        keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
-        const timeText = planConfig.editTime ? "Editing time ⏰" : "🔒Editing time🔒";
-        keyboard.inline_keyboard.push([{ text: timeText, callback_data: `edit_time:${ch.chatId}` }]);
-        const postText = planConfig.editPost ? "Edit post ✏️" : "🔒Edit post🔒";
-        keyboard.inline_keyboard.push([{ text: postText, callback_data: `edit_post:${ch.chatId}` }]);
-        const reactionText = planConfig.editReaction ? "Edit reaction ❤️" : "🔒Edit reaction🔒";
-        keyboard.inline_keyboard.push([{ text: reactionText, callback_data: `edit_reaction:${ch.chatId}` }]);
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_manage_channel" }]);
-        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-        await answerCallbackQuery(cb.id);
       } else if (data.startsWith("connect_our:")) {
         if (!planConfig.integrateOur) {
           await answerCallbackQuery(cb.id, "Locked for your plan 🔒");
@@ -844,7 +763,6 @@ serve(async (req) => {
         panels.forEach(([name]) => {
           keyboard.inline_keyboard.push([{ text: `${name} `, callback_data: `connect_panel:${chatIdStr}:${name}` }]);
         });
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `back_manage_ch:${chatIdStr}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("connect_panel:")) {
         const [_, chatIdStr, name] = data.split(":");
@@ -867,7 +785,6 @@ serve(async (req) => {
         panels.forEach(([pname]) => {
           keyboard.inline_keyboard.push([{ text: `${pname} ${pname === name ? "✅" : ""}`, callback_data: `connect_panel:${chatIdStr}:${pname}` }]);
         });
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `back_manage_ch:${chatIdStr}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("edit_time:")) {
         if (!planConfig.editTime) {
