@@ -343,7 +343,7 @@ function resetSettings(user: any) {
     ch.marzban = null;
     ch.times = ["10:00"];
     ch.last_posted_hhmm = null;
-    ch.template_text = "```\n<happcode>\n```";
+    ch.template_text = "<happcode>";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -1190,7 +1190,7 @@ serve(async (req) => {
         }
       } else if (state.state.startsWith("admin_")) {
         if (username !== "Masakoff") {
-          await sendMessage(chatId, "You are not admin. ❌");
+          await sendMessage(chatId, ""); //You are not admin. ❌
           await clearState(userId);
           return new Response("ok");
         }
