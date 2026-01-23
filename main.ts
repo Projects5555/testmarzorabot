@@ -60,9 +60,9 @@ const PLANS: Record<string, any> = {
 };
 
 const PLAN_COSTS: Record<string, number> = {
-  starter: 1,
-  pro: 1,
-  premium: 1,
+  starter: 100,
+  pro: 300,
+  premium: 500,
 };
 
 const PLAN_HIERARCHY: Record<string, number> = {
@@ -340,7 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.template_text = "<happcode>";
+    ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -1058,8 +1058,11 @@ serve(async (req) => {
           await clearState(userId);
         }
       } else if (state.state === "edit_time") {
-        const times = text.split(",").map((t) => t.trim());
-        const valid = times.every((t) => /^\d{1,2}:\d{2}$/.test(t));
+        const times = text.split(",").map((t) => t.trim()).map((t) => {
+          const [h, m] = t.split(":").map(Number);
+          return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+        });
+        const valid = times.every((t) => /^\d{2}:\d{2}$/.test(t));
         if (!valid) {
           await sendMessage(chatId, "Invalid format. ❌");
           await clearState(userId);
