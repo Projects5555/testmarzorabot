@@ -228,7 +228,7 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
   const token = await getMarzbanToken(url, adminUser, adminPass);
   if (!token) return null;
   const username = sub_prefix + Math.random().toString(36).substring(2, 8);
-  await removeMarzbanUser(url, token, username); // Clean if exists
+  await removeMarzbanUser(url, token, username);
   const headers = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -342,7 +342,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.template_text = "```\n<happcode>\n```";
+    ch.template_text = "<happcode>";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -470,7 +470,7 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
   }
 }
 
-// -------------------- Scheduler --------------------
+// -------------------- Scheduler (UPDATED - only one post per time slot) --------------------
 setInterval(async () => {
   try {
     const iterator = kv.list({ prefix: ["users"] });
@@ -481,30 +481,39 @@ setInterval(async () => {
       const planConfig = PLANS[user.activePlan];
       const channels = user.channels || [];
       let userChanged = false;
-      for (let i = 0; i < channels.length; i++) {
-        const ch = channels[i];
-        if (!ch.selected || !ch.marzban) continue;
-        const current = new Date();
-        let hour = current.getUTCHours() + 5;
-        if (hour >= 24) hour -= 24;
-        const min = current.getUTCMinutes();
-        const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-        if (ch.times.includes(hhmm)) {
-          const key = ["channel_last_posted", ch.chatId];
-          const entry = await kv.get(key);
-          if (entry.value === hhmm) continue;
-          const atomic = kv.atomic().check(entry).set(key, hhmm);
-          const res = await atomic.commit();
-          if (!res.ok) continue;
-          const postResult = await postToChannel(userId, ch, planConfig, user);
-          if (postResult === "changed") {
-            userChanged = true;
-          }
-        }
+
+      const current = new Date();
+      let hour = current.getUTCHours() + 5;
+      if (hour >= 24) hour -= 24;
+      const min = current.getUTCMinutes();
+      const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
+
+      // Find eligible channels
+      const eligibleChannels = channels.filter((ch: any) =>
+        ch.selected && ch.marzban && ch.times.includes(hhmm)
+      );
+
+      if (eligibleChannels.length === 0) continue;
+
+      // Only process the FIRST eligible channel → one Marzban user + one post
+      const ch = eligibleChannels[0];
+
+      const key = ["channel_last_posted", ch.chatId];
+      const lastEntry = await kv.get(key);
+      if (lastEntry.value === hhmm) continue;
+
+      const atomic = kv.atomic().check(lastEntry).set(key, hhmm);
+      const res = await atomic.commit();
+      if (!res.ok) continue;
+
+      const postResult = await postToChannel(userId, ch, planConfig, user);
+      if (postResult === "changed") {
+        userChanged = true;
       }
-      if (userChanged) {
-        await saveUser(user);
-      }
+    }
+
+    if (userChanged) {
+      await saveUser(user);
     }
   } catch (err) {
     console.error("Scheduler error:", err);
@@ -556,8 +565,8 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     });
     offset = pos + happCode.length;
   }
-  if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
-  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
+  if (!planConfig.noWatermark) postText += "\n\nPowered by @MarzoraBot 🚀";
+  if (!planConfig.noAds) postText += "\nJoin @MarzoraNews for more! 📢";
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
@@ -644,7 +653,6 @@ serve(async (req) => {
           return new Response("ok");
         }
         user.balance -= cost;
-        const oldSubscribed = user.subscribedPlan;
         const oldActive = user.activePlan;
         user.subscribedPlan = buyPlan;
         user.activePlan = buyPlan;
@@ -883,7 +891,6 @@ serve(async (req) => {
         user.channels = channels;
         await saveUser(user);
         await answerCallbackQuery(cb.id, "Connected to our Marzban! ✅");
-        // Refresh connect menu
         const text = "Select Marzban panel to connect to this channel! 🔗";
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Our marzban ✅`, callback_data: `connect_our:${chatIdStr}` }]);
@@ -902,7 +909,6 @@ serve(async (req) => {
         user.channels = channels;
         await saveUser(user);
         await answerCallbackQuery(cb.id, `Connected to ${name}! ✅`);
-        // Refresh
         const text = "Select Marzban panel to connect to this channel! 🔗";
         const keyboard = { inline_keyboard: [] };
         if (planConfig.integrateOur) {
@@ -1338,7 +1344,6 @@ serve(async (req) => {
       return new Response("ok");
     }
     if (text === "/start") {
-      await showMenu(chatId, user);
     } else if (text === "/adminpanel") {
       if (username === "Masakoff") {
         await showAdminPanel(chatId);
