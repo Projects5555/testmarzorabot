@@ -342,8 +342,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.last_posted_hhmm = null;
-    ch.template_text = "<happcode>";
+    ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -481,6 +480,7 @@ setInterval(async () => {
       user = await checkPlanExpiry(user);
       const planConfig = PLANS[user.activePlan];
       const channels = user.channels || [];
+      let userChanged = false;
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i];
         if (!ch.selected || !ch.marzban) continue;
@@ -489,12 +489,21 @@ setInterval(async () => {
         if (hour >= 24) hour -= 24;
         const min = current.getUTCMinutes();
         const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-        if (ch.times.includes(hhmm) && ch.last_posted_hhmm !== hhmm) {
-          await postToChannel(userId, ch, planConfig, user);
-          ch.last_posted_hhmm = hhmm;
-          user.channels[i] = ch;
-          await saveUser(user);
+        if (ch.times.includes(hhmm)) {
+          const key = ["channel_last_posted", ch.chatId];
+          const entry = await kv.get(key);
+          if (entry.value === hhmm) continue;
+          const atomic = kv.atomic().check(entry).set(key, hhmm);
+          const res = await atomic.commit();
+          if (!res.ok) continue;
+          const postResult = await postToChannel(userId, ch, planConfig, user);
+          if (postResult === "changed") {
+            userChanged = true;
+          }
         }
+      }
+      if (userChanged) {
+        await saveUser(user);
       }
     }
   } catch (err) {
@@ -506,27 +515,27 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   const botIdLocal = await getBotId();
   if (!await isAdmin(ch.chatId, userId)) {
     user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
-    await saveUser(user);
     await sendMessage(userId.toString(), `Channel ${ch.username} deleted because you are not admin anymore. ❌`);
-    return;
+    return "changed";
   }
   if (!await isAdmin(ch.chatId, botIdLocal)) {
     user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
-    await saveUser(user);
     await sendMessage(userId.toString(), `Channel ${ch.username} deleted because bot is not admin. ❌`);
-    return;
+    return "changed";
   }
   const chatInfo = await getChat(ch.chatId);
-  if (chatInfo && chatInfo.username !== ch.username) {
+  let changed = false;
+  if (chatInfo && chatInfo.username !== ch.username.replace("@", "")) {
     ch.username = `@${chatInfo.username}`;
     await kv.set(["channel_owners", ch.chatId], userId);
+    changed = true;
   }
   let panel = ch.marzban === "our_marzban" ? await getOurMarzban() : user.panels[ch.marzban];
-  if (!panel) return;
+  if (!panel) return null;
   const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: 0 }, panel.sub_prefix);
-  if (!subData) return;
+  if (!subData) return null;
   const happCode = await convertToHappCode(subData.link);
-  if (!happCode) return;
+  if (!happCode) return null;
   let postText = ch.template_text;
   let postEntities = ch.template_entities.map((e: any) => ({...e}));
   const placeholder = "<happcode>";
@@ -553,6 +562,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
   }
+  return changed ? "changed" : null;
 }
 
 // -------------------- Webhook Handler --------------------
@@ -1100,12 +1110,10 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
-            last_posted_hhmm: null,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
             selected: false,
-            last_post: 0,
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
@@ -1121,6 +1129,7 @@ serve(async (req) => {
         } else {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
+          await kv.delete(["channel_last_posted", ch.chatId]);
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
           await clearState(userId);
@@ -1190,7 +1199,7 @@ serve(async (req) => {
         }
       } else if (state.state.startsWith("admin_")) {
         if (username !== "Masakoff") {
-          await sendMessage(chatId, ""); //You are not admin. ❌
+          await sendMessage(chatId, "You are not admin. ❌");
           await clearState(userId);
           return new Response("ok");
         }
@@ -1260,9 +1269,9 @@ serve(async (req) => {
           if (targetUser.expiry) {
             const dt = new Date(targetUser.expiry);
             const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
-            expiryStr = utc5.toLocaleString('en-GB', { timeZone: 'UTC' }).replace(',', '');
+            expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
           }
-          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr} (UTC+5)`;
+          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}`;
           await sendMessage(chatId, plansText);
           await setState(userId, "admin_modify_plans_expiry", { targetId });
           await sendMessage(chatId, "Send new expiry in format DD.MM.YYYY HH:MM (UTC+5) or 'never' to remove:");
@@ -1334,7 +1343,7 @@ serve(async (req) => {
       if (username === "Masakoff") {
         await showAdminPanel(chatId);
       } else {
-        await sendMessage(chatId, ""); //You are not admin. ❌
+        await sendMessage(chatId, "You are not admin. ❌");
       }
     }
   } catch (err) {
