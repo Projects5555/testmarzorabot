@@ -1334,7 +1334,7 @@ serve(async (req) => {
       if (username === "Masakoff") {
         await showAdminPanel(chatId);
       } else {
-        await sendMessage(chatId, "You are not admin. ❌");
+        await sendMessage(chatId, ""); //You are not admin. ❌
       }
     }
   } catch (err) {
