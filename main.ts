@@ -397,7 +397,7 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
   const activePlan = user.activePlan || "free";
   const subscribedPlan = user.subscribedPlan || "free";
   let expiryStr = "Never";
-  if (activePlan !== "free" && user.expiry) {
+  if (user.expiry) {
     const dt = new Date(user.expiry);
     const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
     expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
@@ -405,7 +405,7 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
   const text = `You are now ${activePlan.charAt(0).toUpperCase() + activePlan.slice(1)}\nExpires: ${expiryStr}`;
   const planOrder = ['free', 'starter', 'pro', 'premium'];
   const subscribedLevel = PLAN_HIERARCHY[subscribedPlan];
-  const keyboard = { inline_keyboard: [] };
+  const keyboard = { inline_keyboard: [[]] };
   for (const pName of planOrder) {
     let btnText = pName.charAt(0).toUpperCase() + pName.slice(1);
     let callback;
@@ -416,7 +416,7 @@ async function showPricing(chatId: string, msgId: number | undefined, user: any)
       btnText = `Buy ${btnText}🛒`;
       callback = `confirm_buy:${pName}`;
     }
-    keyboard.inline_keyboard.push([{ text: btnText, callback_data: callback }]);
+    keyboard.inline_keyboard[0].push({ text: btnText, callback_data: callback });
   }
   if (msgId) {
     await editMessageText(chatId, msgId, text, "Markdown", keyboard);
