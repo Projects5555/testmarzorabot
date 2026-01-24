@@ -72,14 +72,12 @@ const PLAN_HIERARCHY: Record<string, number> = {
   premium: 3,
 };
 
-async function getOurMarzban() {
-  const entry = await kv.get(["our_marzban"]);
-  return entry.value || { url: "http://89.23.97.127:3286/dashboard/login", username: "05", password: "05", sub_prefix: "happ_" };
-}
-
-async function saveOurMarzban(data: any) {
-  await kv.set(["our_marzban"], data);
-}
+const OUR_MARZBAN = {
+  url: "http://89.23.97.127:3286/dashboard/login",
+  username: "05",
+  password: "05",
+  sub_prefix: "happ_",
+};
 
 let botId: number | null = null;
 async function getBotId() {
@@ -342,8 +340,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.last_posted_key = null;
-    ch.template_text = "<happcode>";
+    ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
   }
@@ -441,45 +438,9 @@ async function showConfirmBuy(chatId: string, msgId: number, buyPlan: string) {
   await editMessageText(chatId, msgId, text, "Markdown", keyboard);
 }
 
-async function showAdminPanel(chatId: string) {
-  const text = "Here you can work with admin features!";
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "Show profile", callback_data: "admin_show_profile" }],
-      [{ text: "Modify balance", callback_data: "admin_modify_balance" }],
-      [{ text: "Modify plans", callback_data: "admin_modify_plans" }],
-      [{ text: "Our marzban", callback_data: "admin_our_marzban" }],
-    ],
-  };
-  await sendMessage(chatId, text, "Markdown", keyboard);
-}
-
-async function showOurMarzbanManagement(chatId: string, msgId?: number) {
-  const text = "Manage our marzban";
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "Change url", callback_data: "admin_change_our_url" }],
-      [{ text: "Change username", callback_data: "admin_change_our_username" }],
-      [{ text: "Change password", callback_data: "admin_change_our_password" }],
-      [{ text: "Back", callback_data: "admin_back_to_panel" }],
-    ],
-  };
-  if (msgId) {
-    await editMessageText(chatId, msgId, text, "Markdown", keyboard);
-  } else {
-    await sendMessage(chatId, text, "Markdown", keyboard);
-  }
-}
-
 // -------------------- Scheduler --------------------
 setInterval(async () => {
   try {
-    const current = new Date();
-    const local = new Date(current.getTime() + 5 * 3600 * 1000); // UTC+5
-    const currentDate = local.toISOString().slice(0, 10);
-    const hour = local.getHours();
-    const min = local.getMinutes();
-    const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
     const iterator = kv.list({ prefix: ["users"] });
     for await (const entry of iterator) {
       const userId = entry.key[1] as number;
@@ -490,19 +451,16 @@ setInterval(async () => {
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i];
         if (!ch.selected || !ch.marzban) continue;
-        const postKey = `${currentDate}-${hhmm}`;
-        if (ch.times.includes(hhmm) && ch.last_posted_key !== postKey) {
-          const lockKey = ["posting_lock", ch.chatId, postKey];
-          const atomic = kv.atomic()
-            .check({ key: lockKey, versionstamp: null })
-            .set(lockKey, true);
-          const committed = await atomic.commit();
-          if (committed.ok) {
-            await postToChannel(userId, ch, planConfig, user);
-            ch.last_posted_key = postKey;
-            user.channels[i] = ch;
-            await saveUser(user);
-          }
+        const current = new Date();
+        let hour = current.getUTCHours() + 5;
+        if (hour >= 24) hour -= 24;
+        const min = current.getUTCMinutes();
+        const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
+        if (ch.times.includes(hhmm) && (!ch.last_post || Date.now() - ch.last_post > 30000)) {
+          await postToChannel(userId, ch, planConfig, user);
+          ch.last_post = Date.now();
+          user.channels[i] = ch;
+          await saveUser(user);
         }
       }
     }
@@ -530,7 +488,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     ch.username = `@${chatInfo.username}`;
     await kv.set(["channel_owners", ch.chatId], userId);
   }
-  let panel = ch.marzban === "our_marzban" ? await getOurMarzban() : user.panels[ch.marzban];
+  let panel = ch.marzban === "our_marzban" ? OUR_MARZBAN : user.panels[ch.marzban];
   if (!panel) return;
   const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: 0 }, panel.sub_prefix);
   if (!subData) return;
@@ -593,7 +551,6 @@ serve(async (req) => {
       const chatId = cb.message.chat.id.toString();
       const msgId = cb.message.message_id;
       const userId = cb.from.id;
-      const username = cb.from.username;
       let user = await getUser(userId);
       user.first_name = cb.from.first_name;
       user = await checkPlanExpiry(user);
@@ -732,12 +689,9 @@ serve(async (req) => {
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
         await answerCallbackQuery(cb.id);
       } else if (data.startsWith("change_panel_")) {
-        const parts = data.split(":");
-        const fieldStr = parts[0];
-        const name = parts[1];
-        const field = fieldStr.split("_").pop();
-        await setState(userId, `change_panel_${field}`, { name });
-        await editMessageText(chatId, msgId, `Enter new ${field} for ${name}: 📝`);
+        const [_, field, name] = data.split(":");
+        await setState(userId, `change_panel_${field.slice(12)}`, { name });
+        await editMessageText(chatId, msgId, `Enter new ${field.slice(12)} for ${name}: 📝`);
       } else if (data === "channels") {
         const text = "Here you can manage your channels! 📢";
         const keyboard = {
@@ -942,35 +896,6 @@ serve(async (req) => {
         await editMessageText(chatId, msgId, "Send me the reaction emoji (e.g., ❤️): ❤️");
       } else if (data === "locked") {
         await answerCallbackQuery(cb.id, "Locked for your plan 🔒");
-      } else if (data.startsWith("admin_")) {
-        if (username !== "Masakoff") {
-          await answerCallbackQuery(cb.id, "You are not admin.");
-          return new Response("ok");
-        }
-        if (data === "admin_show_profile") {
-          await setState(userId, "admin_show_profile");
-          await editMessageText(chatId, msgId, "Send user ID to show profile:");
-        } else if (data === "admin_modify_balance") {
-          await setState(userId, "admin_modify_balance_id");
-          await editMessageText(chatId, msgId, "Send user ID to modify balance:");
-        } else if (data === "admin_modify_plans") {
-          await setState(userId, "admin_modify_plans_id");
-          await editMessageText(chatId, msgId, "Send user ID to modify plans:");
-        } else if (data === "admin_our_marzban") {
-          await showOurMarzbanManagement(chatId, msgId);
-        } else if (data === "admin_change_our_url") {
-          await setState(userId, "admin_change_our_url");
-          await editMessageText(chatId, msgId, "Send new URL for our marzban:");
-        } else if (data === "admin_change_our_username") {
-          await setState(userId, "admin_change_our_username");
-          await editMessageText(chatId, msgId, "Send new username for our marzban:");
-        } else if (data === "admin_change_our_password") {
-          await setState(userId, "admin_change_our_password");
-          await editMessageText(chatId, msgId, "Send new password for our marzban:");
-        } else if (data === "admin_back_to_panel") {
-          await showAdminPanel(chatId);
-          await answerCallbackQuery(cb.id);
-        }
       }
       return new Response("ok");
     }
@@ -979,7 +904,6 @@ serve(async (req) => {
     const chatId = msg.chat.id.toString();
     const text = msg.text?.trim() || "";
     const userId = msg.from.id;
-    const username = msg.from.username;
     let user = await getUser(userId);
     user.first_name = msg.from.first_name;
     await saveUser(user);
@@ -1109,7 +1033,6 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
-            last_posted_key: null,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
@@ -1197,154 +1120,11 @@ serve(async (req) => {
         } else {
           await clearState(userId);
         }
-      } else if (state.state.startsWith("admin_")) {
-        if (username !== "Masakoff") {
-          await sendMessage(chatId, "You are not admin. ❌");
-          await clearState(userId);
-          return new Response("ok");
-        }
-        if (state.state === "admin_show_profile") {
-          const targetId = parseInt(text);
-          if (isNaN(targetId)) {
-            await sendMessage(chatId, "Invalid user ID. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          const targetUser = await getUser(targetId);
-          if (!targetUser) {
-            await sendMessage(chatId, "User not found. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          let expiryStr = "Never";
-          if (targetUser.expiry) {
-            const dt = new Date(targetUser.expiry);
-            const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
-            expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
-          }
-          const profileText = `User Profile:\nID: \`${targetUser.id}\`\nName: ${targetUser.first_name}\nBalance: ${targetUser.balance || 0} ⭐️\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}\nPanels: ${Object.keys(targetUser.panels || {}).join(", ") || "None"}\nChannels: ${targetUser.channels?.map((c: any) => c.username).join(", ") || "None"}`;
-          await sendMessage(chatId, profileText, "Markdown");
-          await clearState(userId);
-        } else if (state.state === "admin_modify_balance_id") {
-          const targetId = parseInt(text);
-          if (isNaN(targetId)) {
-            await sendMessage(chatId, "Invalid user ID. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          const targetUser = await getUser(targetId);
-          if (!targetUser) {
-            await sendMessage(chatId, "User not found. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          await setState(userId, "admin_modify_balance_amount", { targetId });
-          await sendMessage(chatId, "Send amount to add (positive) or subtract (negative):");
-        } else if (state.state === "admin_modify_balance_amount") {
-          const amount = parseInt(text);
-          if (isNaN(amount)) {
-            await sendMessage(chatId, "Invalid amount. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          const targetUser = await getUser(state.data.targetId);
-          targetUser.balance = (targetUser.balance || 0) + amount;
-          await saveUser(targetUser);
-          await sendMessage(chatId, `Balance updated to ${targetUser.balance} ⭐️ ✅`);
-          await clearState(userId);
-        } else if (state.state === "admin_modify_plans_id") {
-          const targetId = parseInt(text);
-          if (isNaN(targetId)) {
-            await sendMessage(chatId, "Invalid user ID. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          const targetUser = await getUser(targetId);
-          if (!targetUser) {
-            await sendMessage(chatId, "User not found. ❌");
-            await clearState(userId);
-            return new Response("ok");
-          }
-          let expiryStr = "Never";
-          if (targetUser.expiry) {
-            const dt = new Date(targetUser.expiry);
-            const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
-            expiryStr = utc5.toLocaleString('en-GB', { timeZone: 'UTC' }).replace(',', '');
-          }
-          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr} (UTC+5)`;
-          await sendMessage(chatId, plansText);
-          await setState(userId, "admin_modify_plans_expiry", { targetId });
-          await sendMessage(chatId, "Send new expiry in format DD.MM.YYYY HH:MM (UTC+5) or 'never' to remove:");
-        } else if (state.state === "admin_modify_plans_expiry") {
-          const targetUser = await getUser(state.data.targetId);
-          if (text.toLowerCase() === "never") {
-            targetUser.expiry = null;
-          } else {
-            const parts = text.split(" ");
-            if (parts.length !== 2) {
-              await sendMessage(chatId, "Invalid format. ❌");
-              await clearState(userId);
-              return new Response("ok");
-            }
-            const dateParts = parts[0].split(".");
-            if (dateParts.length !== 3) {
-              await sendMessage(chatId, "Invalid format. ❌");
-              await clearState(userId);
-              return new Response("ok");
-            }
-            const timeParts = parts[1].split(":");
-            if (timeParts.length !== 2) {
-              await sendMessage(chatId, "Invalid format. ❌");
-              await clearState(userId);
-              return new Response("ok");
-            }
-            const day = parseInt(dateParts[0]);
-            const month = parseInt(dateParts[1]) - 1;
-            const year = parseInt(dateParts[2]);
-            const hour = parseInt(timeParts[0]);
-            const min = parseInt(timeParts[1]);
-            const utc5Date = new Date(year, month, day, hour, min);
-            if (isNaN(utc5Date.getTime())) {
-              await sendMessage(chatId, "Invalid date. ❌");
-              await clearState(userId);
-              return new Response("ok");
-            }
-            const expiry = utc5Date.getTime() - 5 * 3600 * 1000;
-            targetUser.expiry = expiry;
-          }
-          await saveUser(targetUser);
-          await sendMessage(chatId, "Expiry updated! ✅");
-          await clearState(userId);
-        } else if (state.state === "admin_change_our_url") {
-          const our = await getOurMarzban();
-          our.url = text;
-          await saveOurMarzban(our);
-          await sendMessage(chatId, "URL updated! ✅");
-          await clearState(userId);
-        } else if (state.state === "admin_change_our_username") {
-          const our = await getOurMarzban();
-          our.username = text;
-          await saveOurMarzban(our);
-          await sendMessage(chatId, "Username updated! ✅");
-          await clearState(userId);
-        } else if (state.state === "admin_change_our_password") {
-          const our = await getOurMarzban();
-          our.password = text;
-          await saveOurMarzban(our);
-          await sendMessage(chatId, "Password updated! ✅");
-          await clearState(userId);
-        }
       }
       return new Response("ok");
     }
     if (text === "/start") {
       await showMenu(chatId, user);
-    } else if (text === "/adminpanel") {
-      if (username === "Masakoff") {
-        await showAdminPanel(chatId);
-      } else {
-        await sendMessage(chatId, "You are not admin. ❌");
-      }
     }
   } catch (err) {
     console.error("Error handling update:", err);
