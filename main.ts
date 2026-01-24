@@ -224,7 +224,7 @@ async function removeMarzbanUser(url: string, token: string, username: string): 
   }
 }
 
-async function createMarzbanUser(url: string, adminUser: string, adminPass: string, plan: any, sub_prefix: string): Promise<{ link: string; expiryDate: string } | null> {
+async function createMarzbanUser(url: string, adminUser: string, adminPass: string, traffic_gb: number, sub_prefix: string, protocols: string[]): Promise<{ link: string; expiryDate: string; username: string } | null> {
   const token = await getMarzbanToken(url, adminUser, adminPass);
   if (!token) return null;
   const username = sub_prefix + Math.random().toString(36).substring(2, 8);
@@ -235,19 +235,23 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
     Accept: "application/json",
   };
   const userApiUrl = new URL("/api/user", url).toString();
-  const dataLimitBytes = plan.traffic_gb * 1024 * 1024 * 1024;
+  const dataLimitBytes = traffic_gb * 1024 * 1024 * 1024;
   const expire = null;
   const profileTitleStr = `${username}`;
   const profileTitleB64 = encodeBase64(profileTitleStr);
   const announceB64 = encodeBase64("@HappService");
   const supportUrl = "https://t.me/HappService";
   const profileWebPageUrl = "https://t.me/HappService";
+  const proxies: any = {};
+  for (const proto of protocols) {
+    if (proto === "vless") proxies.vless = { id: crypto.randomUUID() };
+    if (proto === "vmess") proxies.vmess = { id: crypto.randomUUID() };
+    if (proto === "trojan") proxies.trojan = { password: `tr_${username}_${Math.floor(Math.random() * 900) + 100}` };
+    if (proto === "shadowsocks") proxies.shadowsocks = { method: "aes-256-gcm", password: `ss_${username}_${Math.floor(Math.random() * 900) + 100}` };
+  }
   const payload = {
     username,
-    proxies: {
-      vless: { id: crypto.randomUUID() },
-      shadowsocks: { method: "aes-256-gcm", password: `ss_${username}_${Math.floor(Math.random() * 900) + 100}` },
-    },
+    proxies,
     data_limit: dataLimitBytes,
     expire,
     status: "active",
@@ -278,7 +282,7 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
     if (!relativeLink) return null;
     const fullLink = new URL(relativeLink, url).toString();
     const expiryDate = "Unlimited";
-    return { link: fullLink, expiryDate };
+    return { link: fullLink, expiryDate, username };
   } catch (err) {
     console.error("Failed to create/update Marzban user:", err);
     return null;
@@ -346,6 +350,10 @@ function resetSettings(user: any) {
     ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
+    ch.protocols = ["vless", "shadowsocks"];
+    ch.traffic_gb = 0;
+    ch.delete_after_post = false;
+    ch.last_username = null;
   }
   user.channels = channels;
 }
@@ -532,10 +540,17 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   }
   let panel = ch.marzban === "our_marzban" ? await getOurMarzban() : user.panels[ch.marzban];
   if (!panel) return;
-  const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: 0 }, panel.sub_prefix);
+  if (ch.delete_after_post && ch.last_username) {
+    const token = await getMarzbanToken(panel.url, panel.username, panel.password);
+    if (token) {
+      await removeMarzbanUser(panel.url, token, ch.last_username);
+    }
+  }
+  const subData = await createMarzbanUser(panel.url, panel.username, panel.password, ch.traffic_gb, panel.sub_prefix, ch.protocols);
   if (!subData) return;
   const happCode = await convertToHappCode(subData.link);
   if (!happCode) return;
+  ch.last_username = subData.username;
   let postText = ch.template_text;
   let postEntities = ch.template_entities.map((e: any) => ({...e}));
   const placeholder = "<happcode>";
@@ -826,6 +841,7 @@ serve(async (req) => {
         const text = `Here you can change ${ch.username} settings! ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Edit Marzban User ⚙️", callback_data: `edit_marzban_user:${ch.chatId}` }]);
         const timeText = planConfig.editTime ? "Editing time ⏰" : "🔒Editing time🔒";
         keyboard.inline_keyboard.push([{ text: timeText, callback_data: `edit_time:${ch.chatId}` }]);
         const postText = planConfig.editPost ? "Edit post ✏️" : "🔒Edit post🔒";
@@ -834,6 +850,85 @@ serve(async (req) => {
         keyboard.inline_keyboard.push([{ text: reactionText, callback_data: `edit_reaction:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_manage_channel" }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("edit_marzban_user:")) {
+        const chatIdStr = data.slice(18);
+        const channels = user.channels || [];
+        const ch = channels.find((c: any) => c.chatId === chatIdStr);
+        if (!ch) return new Response("ok");
+        if (!ch.marzban) {
+          await answerCallbackQuery(cb.id, "Connect Marzban first 🔗");
+          return new Response("ok");
+        }
+        const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
+        const keyboard = { inline_keyboard: [] };
+        keyboard.inline_keyboard.push([{ text: "Edit protocols", callback_data: `edit_protocols:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: `Edit traffic limit (${ch.traffic_gb} Gb)`, callback_data: `edit_traffic:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: `Delete after posting ${ch.delete_after_post ? "✅" : ""}`, callback_data: `toggle_delete_after:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${ch.chatId}` }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("edit_protocols:")) {
+        const chatIdStr = data.slice(15);
+        const channels = user.channels || [];
+        const ch = channels.find((c: any) => c.chatId === chatIdStr);
+        if (!ch) return new Response("ok");
+        const text = "Select protocols:";
+        const keyboard = { inline_keyboard: [] };
+        const protos = ["vmess", "vless", "trojan", "shadowsocks"];
+        for (const proto of protos) {
+          const selected = ch.protocols.includes(proto) ? "✅" : "";
+          keyboard.inline_keyboard.push([{ text: `${proto.charAt(0).toUpperCase() + proto.slice(1)} ${selected}`, callback_data: `toggle_protocol:${ch.chatId}:${proto}` }]);
+        }
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `edit_marzban_user:${ch.chatId}` }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("toggle_protocol:")) {
+        const parts = data.split(":");
+        const chatIdStr = parts[1];
+        const proto = parts[2];
+        const channels = user.channels || [];
+        const chIndex = channels.findIndex((c: any) => c.chatId === chatIdStr);
+        if (chIndex === -1) return new Response("ok");
+        const ch = channels[chIndex];
+        if (ch.protocols.includes(proto)) {
+          ch.protocols = ch.protocols.filter((p: string) => p !== proto);
+        } else {
+          ch.protocols.push(proto);
+        }
+        user.channels = channels;
+        await saveUser(user);
+        const text = "Select protocols:";
+        const keyboard = { inline_keyboard: [] };
+        const protos = ["vmess", "vless", "trojan", "shadowsocks"];
+        for (const p of protos) {
+          const selected = ch.protocols.includes(p) ? "✅" : "";
+          keyboard.inline_keyboard.push([{ text: `${p.charAt(0).toUpperCase() + p.slice(1)} ${selected}`, callback_data: `toggle_protocol:${ch.chatId}:${p}` }]);
+        }
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `edit_marzban_user:${ch.chatId}` }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+        await answerCallbackQuery(cb.id);
+      } else if (data.startsWith("edit_traffic:")) {
+        const chatIdStr = data.slice(13);
+        const channels = user.channels || [];
+        const ch = channels.find((c: any) => c.chatId === chatIdStr);
+        if (!ch) return new Response("ok");
+        await setState(userId, "edit_traffic_limit", { chatId: chatIdStr });
+        await editMessageText(chatId, msgId, "Enter traffic limit in Gb (0 for unlimited): 📊");
+      } else if (data.startsWith("toggle_delete_after:")) {
+        const chatIdStr = data.slice(20);
+        const channels = user.channels || [];
+        const chIndex = channels.findIndex((c: any) => c.chatId === chatIdStr);
+        if (chIndex === -1) return new Response("ok");
+        channels[chIndex].delete_after_post = !channels[chIndex].delete_after_post;
+        user.channels = channels;
+        await saveUser(user);
+        const ch = channels[chIndex];
+        const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
+        const keyboard = { inline_keyboard: [] };
+        keyboard.inline_keyboard.push([{ text: "Edit protocols", callback_data: `edit_protocols:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: `Edit traffic limit (${ch.traffic_gb} Gb)`, callback_data: `edit_traffic:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: `Delete after posting ${ch.delete_after_post ? "✅" : ""}`, callback_data: `toggle_delete_after:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${ch.chatId}` }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+        await answerCallbackQuery(cb.id);
       } else if (data.startsWith("connect_marzban:")) {
         const chatIdStr = data.slice(16);
         const channels = user.channels || [];
@@ -850,7 +945,7 @@ serve(async (req) => {
         panels.forEach(([name]) => {
           keyboard.inline_keyboard.push([{ text: `${name} ${ch.marzban === name ? "✅" : ""}`, callback_data: `connect_panel:${ch.chatId}:${name}` }]);
         });
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `back_manage_ch:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${ch.chatId}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("back_manage_ch:")) {
         const chatIdStr = data.slice(15);
@@ -860,6 +955,7 @@ serve(async (req) => {
         const text = `Here you can change ${ch.username} settings! ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Edit Marzban User ⚙️", callback_data: `edit_marzban_user:${ch.chatId}` }]);
         const timeText = planConfig.editTime ? "Editing time ⏰" : "🔒Editing time🔒";
         keyboard.inline_keyboard.push([{ text: timeText, callback_data: `edit_time:${ch.chatId}` }]);
         const postText = planConfig.editPost ? "Edit post ✏️" : "🔒Edit post🔒";
@@ -890,7 +986,7 @@ serve(async (req) => {
         panels.forEach(([name]) => {
           keyboard.inline_keyboard.push([{ text: `${name} `, callback_data: `connect_panel:${chatIdStr}:${name}` }]);
         });
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `back_manage_ch:${chatIdStr}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${chatIdStr}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("connect_panel:")) {
         const [_, chatIdStr, name] = data.split(":");
@@ -913,7 +1009,7 @@ serve(async (req) => {
         panels.forEach(([pname]) => {
           keyboard.inline_keyboard.push([{ text: `${pname} ${pname === name ? "✅" : ""}`, callback_data: `connect_panel:${chatIdStr}:${pname}` }]);
         });
-        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `back_manage_ch:${chatIdStr}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${chatIdStr}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("edit_time:")) {
         if (!planConfig.editTime) {
@@ -1114,6 +1210,10 @@ serve(async (req) => {
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
             selected: false,
+            protocols: ["vless", "shadowsocks"],
+            traffic_gb: 0,
+            delete_after_post: false,
+            last_username: null,
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
@@ -1192,6 +1292,24 @@ serve(async (req) => {
           user.channels = channels;
           await saveUser(user);
           await sendMessage(chatId, "Reaction updated! ✅");
+          await clearState(userId);
+        } else {
+          await clearState(userId);
+        }
+      } else if (state.state === "edit_traffic_limit") {
+        const gb = parseFloat(text);
+        if (isNaN(gb) || gb < 0) {
+          await sendMessage(chatId, "Invalid traffic limit. Must be a non-negative number. ❌");
+          await clearState(userId);
+          return new Response("ok");
+        }
+        const channels = user.channels || [];
+        const chIndex = channels.findIndex((c: any) => c.chatId === state.data.chatId);
+        if (chIndex !== -1) {
+          channels[chIndex].traffic_gb = gb;
+          user.channels = channels;
+          await saveUser(user);
+          await sendMessage(chatId, "Traffic limit updated! ✅");
           await clearState(userId);
         } else {
           await clearState(userId);
