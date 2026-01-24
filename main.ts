@@ -72,12 +72,14 @@ const PLAN_HIERARCHY: Record<string, number> = {
   premium: 3,
 };
 
-const OUR_MARZBAN = {
-  url: "http://89.23.97.127:3286/dashboard/login",
-  username: "05",
-  password: "05",
-  sub_prefix: "happ_",
-};
+async function getOurMarzban() {
+  const entry = await kv.get(["our_marzban"]);
+  return entry.value || { url: "http://89.23.97.127:3286/dashboard/login", username: "05", password: "05", sub_prefix: "happ_" };
+}
+
+async function saveOurMarzban(data: any) {
+  await kv.set(["our_marzban"], data);
+}
 
 let botId: number | null = null;
 async function getBotId() {
@@ -438,6 +440,33 @@ async function showConfirmBuy(chatId: string, msgId: number, buyPlan: string) {
   await editMessageText(chatId, msgId, text, "Markdown", keyboard);
 }
 
+async function showAdminPanel(chatId: string) {
+  const text = "Here you can work with admin features!";
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "Our marzban", callback_data: "admin_our_marzban" }],
+    ],
+  };
+  await sendMessage(chatId, text, "Markdown", keyboard);
+}
+
+async function showOurMarzbanManagement(chatId: string, msgId?: number) {
+  const text = "Manage our marzban";
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "Change url", callback_data: "admin_change_our_url" }],
+      [{ text: "Change username", callback_data: "admin_change_our_username" }],
+      [{ text: "Change password", callback_data: "admin_change_our_password" }],
+      [{ text: "Back", callback_data: "admin_back_to_panel" }],
+    ],
+  };
+  if (msgId) {
+    await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+  } else {
+    await sendMessage(chatId, text, "Markdown", keyboard);
+  }
+}
+
 // -------------------- Scheduler --------------------
 setInterval(async () => {
   try {
@@ -488,7 +517,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     ch.username = `@${chatInfo.username}`;
     await kv.set(["channel_owners", ch.chatId], userId);
   }
-  let panel = ch.marzban === "our_marzban" ? OUR_MARZBAN : user.panels[ch.marzban];
+  let panel = ch.marzban === "our_marzban" ? await getOurMarzban() : user.panels[ch.marzban];
   if (!panel) return;
   const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: 0 }, panel.sub_prefix);
   if (!subData) return;
@@ -551,6 +580,7 @@ serve(async (req) => {
       const chatId = cb.message.chat.id.toString();
       const msgId = cb.message.message_id;
       const userId = cb.from.id;
+      const username = cb.from.username || "";
       let user = await getUser(userId);
       user.first_name = cb.from.first_name;
       user = await checkPlanExpiry(user);
@@ -899,6 +929,26 @@ serve(async (req) => {
         await editMessageText(chatId, msgId, "Send me the reaction emoji (e.g., ❤️): ❤️");
       } else if (data === "locked") {
         await answerCallbackQuery(cb.id, "Locked for your plan 🔒");
+      } else if (data.startsWith("admin_")) {
+        if (username !== "Masakoff") {
+          await answerCallbackQuery(cb.id, "You are not admin.");
+          return new Response("ok");
+        }
+        if (data === "admin_our_marzban") {
+          await showOurMarzbanManagement(chatId, msgId);
+        } else if (data === "admin_change_our_url") {
+          await setState(userId, "admin_change_our_url");
+          await editMessageText(chatId, msgId, "Send new URL for our marzban:");
+        } else if (data === "admin_change_our_username") {
+          await setState(userId, "admin_change_our_username");
+          await editMessageText(chatId, msgId, "Send new username for our marzban:");
+        } else if (data === "admin_change_our_password") {
+          await setState(userId, "admin_change_our_password");
+          await editMessageText(chatId, msgId, "Send new password for our marzban:");
+        } else if (data === "admin_back_to_panel") {
+          await showAdminPanel(chatId);
+          await answerCallbackQuery(cb.id);
+        }
       }
       return new Response("ok");
     }
@@ -907,6 +957,7 @@ serve(async (req) => {
     const chatId = msg.chat.id.toString();
     const text = msg.text?.trim() || "";
     const userId = msg.from.id;
+    const username = msg.from.username || "";
     let user = await getUser(userId);
     user.first_name = msg.from.first_name;
     await saveUser(user);
@@ -1123,11 +1174,36 @@ serve(async (req) => {
         } else {
           await clearState(userId);
         }
+      } else if (state.state.startsWith("admin_change_our_")) {
+        if (username !== "Masakoff") {
+          await sendMessage(chatId, "You are not admin. ❌");
+          await clearState(userId);
+          return new Response("ok");
+        }
+        const our = await getOurMarzban();
+        if (state.state === "admin_change_our_url") {
+          our.url = text;
+          await sendMessage(chatId, "URL updated! ✅");
+        } else if (state.state === "admin_change_our_username") {
+          our.username = text;
+          await sendMessage(chatId, "Username updated! ✅");
+        } else if (state.state === "admin_change_our_password") {
+          our.password = text;
+          await sendMessage(chatId, "Password updated! ✅");
+        }
+        await saveOurMarzban(our);
+        await clearState(userId);
       }
       return new Response("ok");
     }
     if (text === "/start") {
       await showMenu(chatId, user);
+    } else if (text === "/adminpanel") {
+      if (username === "Masakoff") {
+        await showAdminPanel(chatId);
+      } else {
+        await sendMessage(chatId, "You are not admin. ❌");
+      }
     }
   } catch (err) {
     console.error("Error handling update:", err);
