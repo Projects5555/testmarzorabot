@@ -1,4 +1,4 @@
-// 🤖 VPN Channel Automation Bot with Localizationn
+// 🤖 VPN Channel Automation Bot with Localization
 // 📱 Automates posting VPN subscriptions to Telegram channels
 // 💾 Uses Deno KV for user data, plans, panels, channels
 // 🔔 Handles plans, settings, top-ups with Telegram Stars
@@ -83,7 +83,7 @@ const translations = {
     marzban_change_url: "Change URL 🌐",
     marzban_change_username: "Change username 👤",
     marzban_change_password: "Change password 🔑",
-    channels_manage: "Channels! 📢",
+    channels_manage: "Channels 📢",
     channels_add: "Add channel ➕",
     channels_delete: "Delete channel ➖",
     channels_select: "Select channel ✅",
@@ -218,7 +218,7 @@ const translations = {
     marzban_change_url: "Изменить URL 🌐",
     marzban_change_username: "Изменить имя пользователя 👤",
     marzban_change_password: "Изменить пароль 🔑",
-    channels_manage: "Каналы! 📢",
+    channels_manage: "Каналы 📢",
     channels_add: "Добавить канал ➕",
     channels_delete: "Удалить канал ➖",
     channels_select: "Выбрать канал ✅",
@@ -353,7 +353,7 @@ const translations = {
     marzban_change_url: "URL üýtget 🌐",
     marzban_change_username: "Ulanyjy adyny üýtget 👤",
     marzban_change_password: "Açarsözi üýtget 🔑",
-    channels_manage: "Kanallar! 📢",
+    channels_manage: "Kanallar 📢",
     channels_add: "Kanal goş ➕",
     channels_delete: "Kanal pozu ➖",
     channels_select: "Kanal saýla ✅",
