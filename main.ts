@@ -478,50 +478,65 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 }
 
 // -------------------- Scheduler --------------------
-let schedulerRunning = false;
-setInterval(async () => {
-  if (schedulerRunning) {
-    console.log("Scheduler already running, skipping");
+async function processUser(userId: number) {
+  const lockKey = ["user_lock", userId];
+  const entry = await kv.get(lockKey);
+  const now = Date.now();
+  if (entry.value && entry.value > now) {
     return;
   }
-  schedulerRunning = true;
+  const ttl = 30000; // 30 seconds lock
+  const newLock = now + ttl;
+  const atomic = kv.atomic().check(entry).set(lockKey, newLock);
+  const res = await atomic.commit();
+  if (!res.ok) return;
+  try {
+    let user = await getUser(userId);
+    user = await checkPlanExpiry(user);
+    const planConfig = PLANS[user.activePlan];
+    const channels = user.channels || [];
+    let updated = false;
+    for (let i = 0; i < channels.length; i++) {
+      const ch = channels[i];
+      if (!ch.selected || !ch.marzban) continue;
+      const current = Date.now();
+      let posted = false;
+      for (const time_str of ch.times) {
+        const [h, m] = time_str.split(':').map(Number);
+        const now_utc5 = new Date(current + 5 * 3600 * 1000);
+        const scheduled_utc5 = new Date(now_utc5.getFullYear(), now_utc5.getMonth(), now_utc5.getDate(), h, m, 0, 0);
+        const scheduled_ts = scheduled_utc5.getTime() - 5 * 3600 * 1000;
+        const window = 59 * 60 * 1000;
+        if (current >= scheduled_ts && current < scheduled_ts + window && ch.last_posted_at < scheduled_ts) {
+          await postToChannel(userId, ch, planConfig, user);
+          ch.last_posted_at = scheduled_ts;
+          updated = true;
+          posted = true;
+          break;
+        }
+      }
+      if (posted) {
+        channels[i] = ch;
+      }
+    }
+    if (updated) {
+      user.channels = channels;
+      await saveUser(user);
+    }
+  } finally {
+    await kv.delete(lockKey);
+  }
+}
+
+setInterval(async () => {
   try {
     const iterator = kv.list({ prefix: ["users"] });
     for await (const entry of iterator) {
       const userId = entry.key[1] as number;
-      let user = await getUser(userId);
-      user = await checkPlanExpiry(user);
-      const planConfig = PLANS[user.activePlan];
-      const channels = user.channels || [];
-      let updated = false;
-      for (let i = 0; i < channels.length; i++) {
-        const ch = channels[i];
-        if (!ch.selected || !ch.marzban) continue;
-        const current = Date.now();
-        for (const time_str of ch.times) {
-          const [h, m] = time_str.split(':').map(Number);
-          const now_utc5 = new Date(current + 5 * 3600 * 1000);
-          const scheduled_utc5 = new Date(now_utc5.getFullYear(), now_utc5.getMonth(), now_utc5.getDate(), h, m, 0, 0);
-          const scheduled_ts = scheduled_utc5.getTime() - 5 * 3600 * 1000;
-          const window = 59 * 60 * 1000;
-          if (current >= scheduled_ts && current < scheduled_ts + window && ch.last_posted_at < scheduled_ts) {
-            await postToChannel(userId, ch, planConfig, user);
-            ch.last_posted_at = current;
-            channels[i] = ch;
-            updated = true;
-            break;
-          }
-        }
-      }
-      if (updated) {
-        user.channels = channels;
-        await saveUser(user);
-      }
+      await processUser(userId);
     }
   } catch (err) {
     console.error("Scheduler error:", err);
-  } finally {
-    schedulerRunning = false;
   }
 }, 60000);
 
