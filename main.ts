@@ -225,6 +225,10 @@ async function removeMarzbanUser(url: string, token: string, username: string): 
 }
 
 async function createMarzbanUser(url: string, adminUser: string, adminPass: string, traffic_gb: number, sub_prefix: string, protocols: string[]): Promise<{ link: string; expiryDate: string; username: string } | null> {
+  let protos = protocols;
+  if (protos.length === 0) {
+    protos = ["vless", "shadowsocks"];
+  }
   const token = await getMarzbanToken(url, adminUser, adminPass);
   if (!token) return null;
   const username = sub_prefix + Math.random().toString(36).substring(2, 8);
@@ -243,7 +247,7 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
   const supportUrl = "https://t.me/HappService";
   const profileWebPageUrl = "https://t.me/HappService";
   const proxies: any = {};
-  for (const proto of protocols) {
+  for (const proto of protos) {
     if (proto === "vless") proxies.vless = { id: crypto.randomUUID() };
     if (proto === "vmess") proxies.vmess = { id: crypto.randomUUID() };
     if (proto === "trojan") proxies.trojan = { password: `tr_${username}_${Math.floor(Math.random() * 900) + 100}` };
@@ -889,6 +893,10 @@ serve(async (req) => {
         if (chIndex === -1) return new Response("ok");
         const ch = channels[chIndex];
         if (ch.protocols.includes(proto)) {
+          if (ch.protocols.length === 1) {
+            await answerCallbackQuery(cb.id, "At least one protocol required.");
+            return new Response("ok");
+          }
           ch.protocols = ch.protocols.filter((p: string) => p !== proto);
         } else {
           ch.protocols.push(proto);
