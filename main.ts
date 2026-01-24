@@ -444,6 +444,9 @@ async function showAdminPanel(chatId: string) {
   const text = "Here you can work with admin features!";
   const keyboard = {
     inline_keyboard: [
+      [{ text: "Show profile", callback_data: "admin_show_profile" }],
+      [{ text: "Modify balance", callback_data: "admin_modify_balance" }],
+      [{ text: "Modify plans", callback_data: "admin_modify_plans" }],
       [{ text: "Our marzban", callback_data: "admin_our_marzban" }],
     ],
   };
@@ -934,7 +937,16 @@ serve(async (req) => {
           await answerCallbackQuery(cb.id, "You are not admin.");
           return new Response("ok");
         }
-        if (data === "admin_our_marzban") {
+        if (data === "admin_show_profile") {
+          await setState(userId, "admin_show_profile");
+          await editMessageText(chatId, msgId, "Send user ID to show profile:");
+        } else if (data === "admin_modify_balance") {
+          await setState(userId, "admin_modify_balance_id");
+          await editMessageText(chatId, msgId, "Send user ID to modify balance:");
+        } else if (data === "admin_modify_plans") {
+          await setState(userId, "admin_modify_plans_id");
+          await editMessageText(chatId, msgId, "Send user ID to modify plans:");
+        } else if (data === "admin_our_marzban") {
           await showOurMarzbanManagement(chatId, msgId);
         } else if (data === "admin_change_our_url") {
           await setState(userId, "admin_change_our_url");
@@ -1174,25 +1186,143 @@ serve(async (req) => {
         } else {
           await clearState(userId);
         }
-      } else if (state.state.startsWith("admin_change_our_")) {
+      } else if (state.state.startsWith("admin_")) {
         if (username !== "Masakoff") {
           await sendMessage(chatId, "You are not admin. ❌");
           await clearState(userId);
           return new Response("ok");
         }
-        const our = await getOurMarzban();
-        if (state.state === "admin_change_our_url") {
+        if (state.state === "admin_show_profile") {
+          const targetId = parseInt(text);
+          if (isNaN(targetId)) {
+            await sendMessage(chatId, "Invalid user ID. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          const targetUser = await getUser(targetId);
+          if (!targetUser) {
+            await sendMessage(chatId, "User not found. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          let expiryStr = "Never";
+          if (targetUser.expiry) {
+            const dt = new Date(targetUser.expiry);
+            const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
+            expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
+          }
+          const profileText = `User Profile:\nID: \`${targetUser.id}\`\nName: ${targetUser.first_name}\nBalance: ${targetUser.balance || 0} ⭐️\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}\nPanels: ${Object.keys(targetUser.panels || {}).join(", ") || "None"}\nChannels: ${targetUser.channels?.map((c: any) => c.username).join(", ") || "None"}`;
+          await sendMessage(chatId, profileText, "Markdown");
+          await clearState(userId);
+        } else if (state.state === "admin_modify_balance_id") {
+          const targetId = parseInt(text);
+          if (isNaN(targetId)) {
+            await sendMessage(chatId, "Invalid user ID. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          const targetUser = await getUser(targetId);
+          if (!targetUser) {
+            await sendMessage(chatId, "User not found. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          await setState(userId, "admin_modify_balance_amount", { targetId });
+          await sendMessage(chatId, "Send amount to add (positive) or subtract (negative):");
+        } else if (state.state === "admin_modify_balance_amount") {
+          const amount = parseInt(text);
+          if (isNaN(amount)) {
+            await sendMessage(chatId, "Invalid amount. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          const targetUser = await getUser(state.data.targetId);
+          targetUser.balance = (targetUser.balance || 0) + amount;
+          await saveUser(targetUser);
+          await sendMessage(chatId, `Balance updated to ${targetUser.balance} ⭐️ ✅`);
+          await clearState(userId);
+        } else if (state.state === "admin_modify_plans_id") {
+          const targetId = parseInt(text);
+          if (isNaN(targetId)) {
+            await sendMessage(chatId, "Invalid user ID. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          const targetUser = await getUser(targetId);
+          if (!targetUser) {
+            await sendMessage(chatId, "User not found. ❌");
+            await clearState(userId);
+            return new Response("ok");
+          }
+          let expiryStr = "Never";
+          if (targetUser.expiry) {
+            const dt = new Date(targetUser.expiry);
+            const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
+            expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
+          }
+          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}`;
+          await sendMessage(chatId, plansText);
+          await setState(userId, "admin_modify_plans_expiry", { targetId });
+          await sendMessage(chatId, "Send new expiry in format DD.MM.YYYY HH:MM (UTC+5) or 'never' to remove:");
+        } else if (state.state === "admin_modify_plans_expiry") {
+          const targetUser = await getUser(state.data.targetId);
+          if (text.toLowerCase() === "never") {
+            targetUser.expiry = null;
+          } else {
+            const parts = text.split(" ");
+            if (parts.length !== 2) {
+              await sendMessage(chatId, "Invalid format. ❌");
+              await clearState(userId);
+              return new Response("ok");
+            }
+            const dateParts = parts[0].split(".");
+            if (dateParts.length !== 3) {
+              await sendMessage(chatId, "Invalid format. ❌");
+              await clearState(userId);
+              return new Response("ok");
+            }
+            const timeParts = parts[1].split(":");
+            if (timeParts.length !== 2) {
+              await sendMessage(chatId, "Invalid format. ❌");
+              await clearState(userId);
+              return new Response("ok");
+            }
+            const day = parseInt(dateParts[0]);
+            const month = parseInt(dateParts[1]) - 1;
+            const year = parseInt(dateParts[2]);
+            const hour = parseInt(timeParts[0]);
+            const min = parseInt(timeParts[1]);
+            const utc5Date = new Date(year, month, day, hour, min);
+            if (isNaN(utc5Date.getTime())) {
+              await sendMessage(chatId, "Invalid date. ❌");
+              await clearState(userId);
+              return new Response("ok");
+            }
+            const expiry = utc5Date.getTime() - 5 * 3600 * 1000;
+            targetUser.expiry = expiry;
+          }
+          await saveUser(targetUser);
+          await sendMessage(chatId, "Expiry updated! ✅");
+          await clearState(userId);
+        } else if (state.state === "admin_change_our_url") {
+          const our = await getOurMarzban();
           our.url = text;
+          await saveOurMarzban(our);
           await sendMessage(chatId, "URL updated! ✅");
+          await clearState(userId);
         } else if (state.state === "admin_change_our_username") {
+          const our = await getOurMarzban();
           our.username = text;
+          await saveOurMarzban(our);
           await sendMessage(chatId, "Username updated! ✅");
+          await clearState(userId);
         } else if (state.state === "admin_change_our_password") {
+          const our = await getOurMarzban();
           our.password = text;
+          await saveOurMarzban(our);
           await sendMessage(chatId, "Password updated! ✅");
+          await clearState(userId);
         }
-        await saveOurMarzban(our);
-        await clearState(userId);
       }
       return new Response("ok");
     }
