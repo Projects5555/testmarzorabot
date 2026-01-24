@@ -478,7 +478,13 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 }
 
 // -------------------- Scheduler --------------------
+let schedulerRunning = false;
 setInterval(async () => {
+  if (schedulerRunning) {
+    console.log("Scheduler already running, skipping");
+    return;
+  }
+  schedulerRunning = true;
   try {
     const iterator = kv.list({ prefix: ["users"] });
     for await (const entry of iterator) {
@@ -514,6 +520,8 @@ setInterval(async () => {
     }
   } catch (err) {
     console.error("Scheduler error:", err);
+  } finally {
+    schedulerRunning = false;
   }
 }, 60000);
 
