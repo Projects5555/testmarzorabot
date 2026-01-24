@@ -342,6 +342,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
+    ch.last_posted_hhmm = null;
     ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
@@ -488,9 +489,9 @@ setInterval(async () => {
         if (hour >= 24) hour -= 24;
         const min = current.getUTCMinutes();
         const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-        if (ch.times.includes(hhmm) && (!ch.last_post || Date.now() - ch.last_post > 30000)) {
+        if (ch.times.includes(hhmm) && ch.last_posted_hhmm !== hhmm) {
           await postToChannel(userId, ch, planConfig, user);
-          ch.last_post = Date.now();
+          ch.last_posted_hhmm = hhmm;
           user.channels[i] = ch;
           await saveUser(user);
         }
@@ -583,7 +584,7 @@ serve(async (req) => {
       const chatId = cb.message.chat.id.toString();
       const msgId = cb.message.message_id;
       const userId = cb.from.id;
-      const username = cb.from.username || "";
+      const username = cb.from.username;
       let user = await getUser(userId);
       user.first_name = cb.from.first_name;
       user = await checkPlanExpiry(user);
@@ -723,11 +724,11 @@ serve(async (req) => {
         await answerCallbackQuery(cb.id);
       } else if (data.startsWith("change_panel_")) {
         const parts = data.split(":");
-        const action = parts[0];
-        const panelName = parts[1];
-        const field = action.replace("change_panel_", "");
-        await setState(userId, `change_panel_${field}`, { name: panelName });
-        await editMessageText(chatId, msgId, `Enter new ${field} for ${panelName}: 📝`);
+        const fieldStr = parts[0];
+        const name = parts[1];
+        const field = fieldStr.split("_").pop();
+        await setState(userId, `change_panel_${field}`, { name });
+        await editMessageText(chatId, msgId, `Enter new ${field} for ${name}: 📝`);
       } else if (data === "channels") {
         const text = "Here you can manage your channels! 📢";
         const keyboard = {
@@ -969,7 +970,7 @@ serve(async (req) => {
     const chatId = msg.chat.id.toString();
     const text = msg.text?.trim() || "";
     const userId = msg.from.id;
-    const username = msg.from.username || "";
+    const username = msg.from.username;
     let user = await getUser(userId);
     user.first_name = msg.from.first_name;
     await saveUser(user);
@@ -1099,6 +1100,7 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
+            last_posted_hhmm: null,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
@@ -1258,9 +1260,9 @@ serve(async (req) => {
           if (targetUser.expiry) {
             const dt = new Date(targetUser.expiry);
             const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
-            expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
+            expiryStr = utc5.toLocaleString('en-GB', { timeZone: 'UTC' }).replace(',', '');
           }
-          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}`;
+          const plansText = `User ${targetUser.id} - ${targetUser.first_name}\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr} (UTC+5)`;
           await sendMessage(chatId, plansText);
           await setState(userId, "admin_modify_plans_expiry", { targetId });
           await sendMessage(chatId, "Send new expiry in format DD.MM.YYYY HH:MM (UTC+5) or 'never' to remove:");
