@@ -307,7 +307,7 @@ const translations = {
     settings_edit_post: "{status}Posty üýtgetmek ✏️",
     settings_no_watermark: "{status}Wodemark ýok 🚫",
     settings_edit_reaction: "{status}Reaksiýany üýtgetmek ❤️",
-    settings_no_ads: "{Status}Reklama ýok 📵",
+    settings_no_ads: "{status}Reklama ýok 📵",
     settings_integrate_our: "{status}Bizim Marzban-y birleşdirmek 🔗",
     status_enabled: "✅",
     status_disabled: "🚫",
