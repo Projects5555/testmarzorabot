@@ -224,7 +224,7 @@ async function removeMarzbanUser(url: string, token: string, username: string): 
   }
 }
 
-async function createMarzbanUser(url: string, adminUser: string, adminPass: string, plan: any, sub_prefix: string, protocols: string[] = ['vless', 'shadowsocks']): Promise<{ link: string; expiryDate: string } | null> {
+async function createMarzbanUser(url: string, adminUser: string, adminPass: string, plan: any, sub_prefix: string, protocols: string[] = ['vless', 'shadowsocks']): Promise<{ link: string; expiryDate: string; username: string } | null> {
   const token = await getMarzbanToken(url, adminUser, adminPass);
   if (!token) return null;
   const username = sub_prefix + Math.random().toString(36).substring(2, 8);
@@ -280,7 +280,7 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
     if (!relativeLink) return null;
     const fullLink = new URL(relativeLink, url).toString();
     const expiryDate = "Unlimited";
-    return { link: fullLink, expiryDate };
+    return { link: fullLink, expiryDate, username };
   } catch (err) {
     console.error("Failed to create/update Marzban user:", err);
     return null;
@@ -573,7 +573,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
   }
-  ch.last_username = subData.link.split('/').pop(); // Extract username from sub url, assuming it's /sub/username
+  ch.last_username = subData.username;
 }
 
 // -------------------- Webhook Handler --------------------
@@ -1175,7 +1175,7 @@ serve(async (req) => {
           await clearState(userId);
           return new Response("ok");
         } else {
-          const defaultTemplate = "<happcode>";
+          const defaultTemplate = "```\n<happcode>\n```";
           user.channels.push({
             chatId: chChatId,
             username,
