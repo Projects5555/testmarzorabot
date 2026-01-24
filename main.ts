@@ -1,4 +1,4 @@
-// 🤖 VPN Channel Automation Bott
+// 🤖 VPN Channel Automation Bot
 // 📱 Automates posting VPN subscriptions to Telegram channels
 // 💾 Uses Deno KV for user data, plans, panels, channels
 // 🔔 Handles plans, settings, top-ups with Telegram Stars
