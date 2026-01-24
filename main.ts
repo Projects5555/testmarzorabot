@@ -342,7 +342,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.last_posted_hhmm = null;
+    ch.last_posted_at = 0;
     ch.template_text = "```\n<happcode>\n```";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
@@ -481,20 +481,29 @@ setInterval(async () => {
       user = await checkPlanExpiry(user);
       const planConfig = PLANS[user.activePlan];
       const channels = user.channels || [];
+      let updated = false;
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i];
         if (!ch.selected || !ch.marzban) continue;
-        const current = new Date();
-        let hour = current.getUTCHours() + 5;
-        if (hour >= 24) hour -= 24;
-        const min = current.getUTCMinutes();
-        const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-        if (ch.times.includes(hhmm) && ch.last_posted_hhmm !== hhmm) {
-          await postToChannel(userId, ch, planConfig, user);
-          ch.last_posted_hhmm = hhmm;
-          user.channels[i] = ch;
-          await saveUser(user);
+        const current = Date.now();
+        for (const time_str of ch.times) {
+          const [h, m] = time_str.split(':').map(Number);
+          const now_utc5 = new Date(current + 5 * 3600 * 1000);
+          const scheduled_utc5 = new Date(now_utc5.getFullYear(), now_utc5.getMonth(), now_utc5.getDate(), h, m, 0, 0);
+          const scheduled_ts = scheduled_utc5.getTime() - 5 * 3600 * 1000;
+          const window = 59 * 60 * 1000;
+          if (current >= scheduled_ts && current < scheduled_ts + window && ch.last_posted_at < scheduled_ts) {
+            await postToChannel(userId, ch, planConfig, user);
+            ch.last_posted_at = current;
+            channels[i] = ch;
+            updated = true;
+            break;
+          }
         }
+      }
+      if (updated) {
+        user.channels = channels;
+        await saveUser(user);
       }
     }
   } catch (err) {
@@ -1100,12 +1109,11 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
-            last_posted_hhmm: null,
+            last_posted_at: 0,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
             selected: false,
-            last_post: 0,
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
