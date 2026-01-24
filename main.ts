@@ -342,7 +342,7 @@ function resetSettings(user: any) {
     ch.selected = false;
     ch.marzban = null;
     ch.times = ["10:00"];
-    ch.last_posted_hhmm = null;
+    ch.last_posted_key = null;
     ch.template_text = "<happcode>";
     ch.template_entities = [{ type: "pre", offset: 0, length: ch.template_text.length }];
     ch.reaction = null;
@@ -474,6 +474,12 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 // -------------------- Scheduler --------------------
 setInterval(async () => {
   try {
+    const current = new Date();
+    const local = new Date(current.getTime() + 5 * 3600 * 1000); // UTC+5
+    const currentDate = local.toISOString().slice(0, 10);
+    const hour = local.getHours();
+    const min = local.getMinutes();
+    const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
     const iterator = kv.list({ prefix: ["users"] });
     for await (const entry of iterator) {
       const userId = entry.key[1] as number;
@@ -484,16 +490,19 @@ setInterval(async () => {
       for (let i = 0; i < channels.length; i++) {
         const ch = channels[i];
         if (!ch.selected || !ch.marzban) continue;
-        const current = new Date();
-        let hour = current.getUTCHours() + 5;
-        if (hour >= 24) hour -= 24;
-        const min = current.getUTCMinutes();
-        const hhmm = `${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
-        if (ch.times.includes(hhmm) && ch.last_posted_hhmm !== hhmm) {
-          await postToChannel(userId, ch, planConfig, user);
-          ch.last_posted_hhmm = hhmm;
-          user.channels[i] = ch;
-          await saveUser(user);
+        const postKey = `${currentDate}-${hhmm}`;
+        if (ch.times.includes(hhmm) && ch.last_posted_key !== postKey) {
+          const lockKey = ["posting_lock", ch.chatId, postKey];
+          const atomic = kv.atomic()
+            .check({ key: lockKey, versionstamp: null })
+            .set(lockKey, true);
+          const committed = await atomic.commit();
+          if (committed.ok) {
+            await postToChannel(userId, ch, planConfig, user);
+            ch.last_posted_key = postKey;
+            user.channels[i] = ch;
+            await saveUser(user);
+          }
         }
       }
     }
@@ -1100,7 +1109,7 @@ serve(async (req) => {
             username,
             marzban: null,
             times: ["10:00"],
-            last_posted_hhmm: null,
+            last_posted_key: null,
             template_text: defaultTemplate,
             template_entities: [{ type: "pre", offset: 0, length: defaultTemplate.length }],
             reaction: null,
@@ -1190,7 +1199,7 @@ serve(async (req) => {
         }
       } else if (state.state.startsWith("admin_")) {
         if (username !== "Masakoff") {
-          await sendMessage(chatId, ""); //You are not admin. ❌
+          await sendMessage(chatId, "You are not admin. ❌");
           await clearState(userId);
           return new Response("ok");
         }
@@ -1334,7 +1343,7 @@ serve(async (req) => {
       if (username === "Masakoff") {
         await showAdminPanel(chatId);
       } else {
-        await sendMessage(chatId, ""); //You are not admin. ❌
+        await sendMessage(chatId, "You are not admin. ❌");
       }
     }
   } catch (err) {
