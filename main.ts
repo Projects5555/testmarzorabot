@@ -1996,4 +1996,4 @@ serve(async (req) => {
 // -------------------- Webhook Setup --------------------
 // You need to set the webhook after deploying
 // Use: https://api.telegram.org/bot<TOKEN>/setWebhook?url=<YOUR_DENO_DEPLOY_URL>
-// Replace <TOKEN> with your bot token and <YOUR_DENO_DEPLOY_URL> with your deployed URL
+// Replace <TOKEN> with your bot token and <YOUR_DENO_DEPLOY_URL> with your deployed URLl
