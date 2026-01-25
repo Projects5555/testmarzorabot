@@ -4,7 +4,7 @@
 // 🔔 Handles plans, settings, top-ups with Telegram Stars
 // 📊 Integrates with user Marzban panels or our Marzban (premium)
 // ⚠️ Posts Happ codes at scheduled times with custom features
-// 🌍 Full localization:  English, Russian, Turkmen
+// 🌍 Full localization: English, Russian, Turkmen
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
