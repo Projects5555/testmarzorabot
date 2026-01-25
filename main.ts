@@ -4,7 +4,7 @@
 // 🔔 Handles plans, settings, top-ups with Telegram Stars
 // 📊 Integrates with user Marzban panels or our Marzban (premium)
 // ⚠️ Posts Happ codes at scheduled times with custom features
-// 🌍 Full localization: English, Russian, Turkmen
+// 🌍 Full localization:  English, Russian, Turkmen
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
@@ -28,6 +28,8 @@ const translations = {
     menu_settings: "Settings ⚙️",
     menu_topup: "Top up 💰",
     menu_pricing: "Pricing plans 💲",
+    menu_our_channel: "Our channel 📢",
+    menu_our_chat: "Our chat 💬",
     menu_language: "Language 🌍",
     plan_info: "You are in {plan} plan 📊",
     settings: "Settings:\n{maxChannels}\n{editTime}\n{editPost}\n{noWatermark}\n{editReaction}\n{noAds}\n{integrateOur}",
@@ -65,6 +67,8 @@ const translations = {
     plan_cost: "Costs {cost}⭐️",
     confirm_buy: "Buy",
     confirm_cancel: "Cancel",
+    our_channel_message: "Join our channel for updates: https://t.me/MarzoraNews 📢",
+    our_chat_message: "Join our chat for discussions: https://t.me/MarzoraChat 💬",
     marzban_manage: "Here you can manage your Marzban panels! 🛠️",
     marzban_add: "Add Marzban ➕",
     marzban_delete: "Delete Marzban ➖",
@@ -163,6 +167,8 @@ const translations = {
     menu_settings: "Настройки ⚙️",
     menu_topup: "Пополнить 💰",
     menu_pricing: "Тарифные планы 💲",
+    menu_our_channel: "Наш канал 📢",
+    menu_our_chat: "Наш чат 💬",
     menu_language: "Язык 🌍",
     plan_info: "Вы на тарифе {plan} 📊",
     settings: "Настройки:\n{maxChannels}\n{editTime}\n{editPost}\n{noWatermark}\n{editReaction}\n{noAds}\n{integrateOur}",
@@ -200,6 +206,8 @@ const translations = {
     plan_cost: "Стоимость: {cost}⭐️",
     confirm_buy: "Купить",
     confirm_cancel: "Отмена",
+    our_channel_message: "Присоединяйтесь к нашему каналу для обновлений: https://t.me/MarzoraNews 📢",
+    our_chat_message: "Присоединяйтесь к нашему чату для обсуждений: https://t.me/MarzoraChat 💬",
     marzban_manage: "Здесь вы можете управлять вашими панелями Marzban! 🛠️",
     marzban_add: "Добавить Marzban ➕",
     marzban_delete: "Удалить Marzban ➖",
@@ -298,6 +306,8 @@ const translations = {
     menu_settings: "Sazlamalar ⚙️",
     menu_topup: "Balansy doldur 💰",
     menu_pricing: "Meýilnama bahalary 💲",
+    menu_our_channel: "Biziň kanal 📢",
+    menu_our_chat: "Biziň chat 💬",
     menu_language: "Dil 🌍",
     plan_info: "Siz {plan} meýilnamasynda 📊",
     settings: "Sazlamalar:\n{maxChannels}\n{editTime}\n{editPost}\n{noWatermark}\n{editReaction}\n{noAds}\n{integrateOur}",
@@ -335,6 +345,8 @@ const translations = {
     plan_cost: "Bahasy: {cost}⭐️",
     confirm_buy: "Satyn al",
     confirm_cancel: "Ýatyr",
+    our_channel_message: "Täzelenmeler üçin kanala goşulyň: https://t.me/MarzoraNews 📢",
+    our_chat_message: "Gürrüňler üçin chata goşulyň: https://t.me/MarzoraChat 💬",
     marzban_manage: "Bu ýerde Marzban paneliňizi dolandyryp bilersiňiz! 🛠️",
     marzban_add: "Marzban goş ➕",
     marzban_delete: "Marzban pozu ➖",
@@ -695,9 +707,9 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
   const expire = null;
   const profileTitleStr = `${username}`;
   const profileTitleB64 = encodeBase64(profileTitleStr);
-  const announceB64 = encodeBase64("@HappService");
-  const supportUrl = "https://t.me/HappService";
-  const profileWebPageUrl = "https://t.me/HappService";
+  const announceB64 = encodeBase64("@MarzoraNews");
+  const supportUrl = "https://t.me/MarzoraNews";
+  const profileWebPageUrl = "https://t.me/MarzoraNews";
   const proxies: any = {};
   if (protocols.includes('vmess')) proxies.vmess = { id: crypto.randomUUID() };
   if (protocols.includes('vless')) proxies.vless = { id: crypto.randomUUID() };
@@ -844,6 +856,8 @@ async function showMenu(chatId: string, user: any) {
       [{ text: t('menu_settings', lang), callback_data: "settings" }],
       [{ text: t('menu_topup', lang), callback_data: "top_up" }],
       [{ text: t('menu_pricing', lang), callback_data: "pricing" }],
+      [{ text: t('menu_our_channel', lang), callback_data: "our_channel" }],
+      [{ text: t('menu_our_chat', lang), callback_data: "our_chat" }],
       [{ text: t('menu_language', lang), callback_data: "change_language" }],
     ],
   };
@@ -1078,8 +1092,8 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     });
     offset = pos + happCode.length;
   }
-  if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
-  if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
+  if (!planConfig.noWatermark) postText += "\n\nPowered by @MarzoraBot 🚀";
+  if (!planConfig.noAds) postText += "\nJoin @MarzoraNews for more! 📢";
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
@@ -1152,6 +1166,12 @@ serve(async (req) => {
         await editMessageText(chatId, msgId, t('top_up_prompt', lang), "Markdown");
       } else if (data === "pricing") {
         await showPricing(chatId, msgId, user);
+      } else if (data === "our_channel") {
+        await answerCallbackQuery(cb.id);
+        await sendMessage(chatId, t('our_channel_message', lang), "Markdown");
+      } else if (data === "our_chat") {
+        await answerCallbackQuery(cb.id);
+        await sendMessage(chatId, t('our_chat_message', lang), "Markdown");
       } else if (data.startsWith("select_plan:")) {
         const newPlan = data.slice(12);
         if (newPlan === activePlan) {
