@@ -400,9 +400,10 @@ async function showMenu(chatId: string, user: any) {
       [{ text: "Пополнить 💰", callback_data: "top_up" }],
       [{ text: "Тарифы 💲", callback_data: "pricing" }],
       [
-        { text: "Наш канал", url: "https://t.me/MarzoraNews" },
-        { text: "Наш чат", url: "https://t.me/MarzoraChat" }
-      ]
+        { text: "Наш канал📢", url: "https://t.me/MarzoraNews" },
+        { text: "Наш чат💬", url: "https://t.me/MarzoraChat" }
+      ],
+      [{ text: "Support", url: "https://t.me/MarzoraSupport" }]
     ],
   };
   await sendMessage(chatId, text, "Markdown", keyboard);
