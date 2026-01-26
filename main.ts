@@ -393,8 +393,8 @@ async function showMenu(chatId: string, user: any) {
       [{ text: "Top up 💰", callback_data: "top_up" }],
       [{ text: "Pricing plans 💲", callback_data: "pricing" }],
       [
-        { text: "Our channel", url: "https://t.me/MarzoraNews" },
-        { text: "Our chat", url: "https://t.me/MarzoraChat" }
+        { text: "Our channel📢", url: "https://t.me/MarzoraNews" },
+        { text: "Our chat💬", url: "https://t.me/MarzoraChat" }
       ]
     ],
   };
