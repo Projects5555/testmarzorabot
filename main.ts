@@ -392,6 +392,10 @@ async function showMenu(chatId: string, user: any) {
       [{ text: "Settings ⚙️", callback_data: "settings" }],
       [{ text: "Top up 💰", callback_data: "top_up" }],
       [{ text: "Pricing plans 💲", callback_data: "pricing" }],
+      [
+        { text: "Our channel", url: "https://t.me/MarzoraNews" },
+        { text: "Our chat", url: "https://t.me/MarzoraChat" }
+      ]
     ],
   };
   await sendMessage(chatId, text, "Markdown", keyboard);
