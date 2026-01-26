@@ -19,6 +19,12 @@ const HAPP_API_URL = "https://crypto.happ.su/api.php";
 // -------------------- Deno KV --------------------
 const kv = await Deno.openKv();
 
+// -------------------- Caches --------------------
+const userCache = new Map<number, any>();
+const stateCache = new Map<number, any>();
+let ourMarzbanCache: any = null;
+let botId: number | null = null;
+
 // -------------------- Constants --------------------
 const PLANS: Record<string, any> = {
   free: {
@@ -73,15 +79,17 @@ const PLAN_HIERARCHY: Record<string, number> = {
 };
 
 async function getOurMarzban() {
+  if (ourMarzbanCache) return ourMarzbanCache;
   const entry = await kv.get(["our_marzban"]);
-  return entry.value || { url: "http://89.23.97.127:3286/dashboard/login", username: "05", password: "05", sub_prefix: "happ_" };
+  ourMarzbanCache = entry.value || { url: "http://89.23.97.127:3286/dashboard/login", username: "05", password: "05", sub_prefix: "happ_" };
+  return ourMarzbanCache;
 }
 
 async function saveOurMarzban(data: any) {
   await kv.set(["our_marzban"], data);
+  ourMarzbanCache = data;
 }
 
-let botId: number | null = null;
 async function getBotId() {
   if (botId) return botId;
   const res = await fetch(`${API}/getMe`);
@@ -94,6 +102,10 @@ async function getBotId() {
 }
 
 // -------------------- Helpers --------------------
+function escapeMarkdown(text: string): string {
+  return text.replace(/([_*`\[])/g, '\\$1');
+}
+
 async function sendMessage(chatId: string, text: string, parseMode: string | null = "Markdown", replyMarkup: any = null, entities: any[] | null = null) {
   try {
     const body: any = { chat_id: chatId, text };
@@ -305,25 +317,35 @@ async function convertToHappCode(subUrl: string): Promise<string | null> {
 
 // -------------------- User Data Helpers --------------------
 async function getUser(userId: number): Promise<any> {
+  if (userCache.has(userId)) return userCache.get(userId);
   const entry = await kv.get(["users", userId]);
-  return entry.value || { id: userId, subscribedPlan: "free", activePlan: "free", balance: 0, panels: {}, channels: [], first_name: "", expiry: null };
+  const user = entry.value || { id: userId, subscribedPlan: "free", activePlan: "free", balance: 0, panels: {}, channels: [], first_name: "", expiry: null };
+  userCache.set(userId, user);
+  return user;
 }
 
 async function saveUser(user: any) {
   await kv.set(["users", user.id], user);
+  userCache.set(user.id, user);
 }
 
 async function getState(userId: number): Promise<any> {
+  if (stateCache.has(userId)) return stateCache.get(userId);
   const entry = await kv.get(["states", userId]);
-  return entry.value || null;
+  const state = entry.value || null;
+  stateCache.set(userId, state);
+  return state;
 }
 
 async function setState(userId: number, state: string, data: any = {}) {
-  await kv.set(["states", userId], { state, data });
+  const val = { state, data };
+  await kv.set(["states", userId], val);
+  stateCache.set(userId, val);
 }
 
 async function clearState(userId: number) {
   await kv.delete(["states", userId]);
+  stateCache.delete(userId);
 }
 
 async function checkPlanExpiry(user: any) {
@@ -545,19 +567,18 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   if (!await isAdmin(ch.chatId, userId)) {
     user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
     await saveUser(user);
-    await sendMessage(userId.toString(), `Channel ${ch.username} deleted because you are not admin anymore. ❌`);
+    await sendMessage(userId.toString(), `Channel ${escapeMarkdown(ch.username)} deleted because you are not admin anymore. ❌`, "Markdown");
     return;
   }
   if (!await isAdmin(ch.chatId, botIdLocal)) {
     user.channels = user.channels.filter((c: any) => c.chatId !== ch.chatId);
     await saveUser(user);
-    await sendMessage(userId.toString(), `Channel ${ch.username} deleted because bot is not admin. ❌`);
+    await sendMessage(userId.toString(), `Channel ${escapeMarkdown(ch.username)} deleted because bot is not admin. ❌`, "Markdown");
     return;
   }
   const chatInfo = await getChat(ch.chatId);
-  if (chatInfo && chatInfo.username !== ch.username) {
+  if (chatInfo && chatInfo.username !== ch.username.replace('@', '')) {
     ch.username = `@${chatInfo.username}`;
-    await kv.set(["channel_owners", ch.chatId], userId);
   }
   let panel = ch.marzban === "our_marzban" ? await getOurMarzban() : user.panels[ch.marzban];
   if (!panel) return;
@@ -747,7 +768,7 @@ serve(async (req) => {
         await answerCallbackQuery(cb.id);
       } else if (data.startsWith("manage_panel:")) {
         const name = data.slice(13);
-        const text = `Here you can change ${name} settings! ⚙️`;
+        const text = `Here you can change ${escapeMarkdown(name)} settings! ⚙️`;
         const keyboard = {
           inline_keyboard: [
             [{ text: "Change name 📛", callback_data: `change_panel_name:${name}` }],
@@ -772,7 +793,7 @@ serve(async (req) => {
         const name = parts[1];
         const field = fieldStr.split("_").pop();
         await setState(userId, `change_panel_${field}`, { name });
-        await editMessageText(chatId, msgId, `Enter new ${field} for ${name}: 📝`);
+        await editMessageText(chatId, msgId, `Enter new ${field} for ${escapeMarkdown(name)}: 📝`);
       } else if (data === "channels") {
         const text = "Here you can manage your channels! 📢";
         const keyboard = {
@@ -858,7 +879,7 @@ serve(async (req) => {
         const channels = user.channels || [];
         const ch = channels.find((c: any) => c.chatId === chatIdStr);
         if (!ch) return new Response("ok");
-        const text = `Here you can change ${ch.username} settings! ⚙️`;
+        const text = `Here you can change ${escapeMarkdown(ch.username)} settings! ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit Marzban User ⚙️", callback_data: `edit_marzban_user:${ch.chatId}` }]);
@@ -875,7 +896,7 @@ serve(async (req) => {
         const channels = user.channels || [];
         const ch = channels.find((c: any) => c.chatId === chatIdStr);
         if (!ch) return new Response("ok");
-        const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
+        const text = `Edit Marzban User settings for ${escapeMarkdown(ch.username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Edit protocols", callback_data: `edit_protocols:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit traffic limit", callback_data: `edit_traffic:${ch.chatId}` }]);
@@ -937,7 +958,7 @@ serve(async (req) => {
         await answerCallbackQuery(cb.id);
         // Refresh edit marzban user menu
         const ch = channels[chIndex];
-        const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
+        const text = `Edit Marzban User settings for ${escapeMarkdown(ch.username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Edit protocols", callback_data: `edit_protocols:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit traffic limit", callback_data: `edit_traffic:${ch.chatId}` }]);
@@ -1124,7 +1145,7 @@ serve(async (req) => {
         }
         user.panels[name] = { sub_prefix, url, username, password: text };
         await saveUser(user);
-        await sendMessage(chatId, `Marzban panel ${name} added! ✅`);
+        await sendMessage(chatId, `Marzban panel ${escapeMarkdown(name)} added! ✅`, "Markdown");
         await clearState(userId);
       } else if (state.state === "delete_marzban") {
         user.panels = user.panels || {};
@@ -1134,7 +1155,7 @@ serve(async (req) => {
         } else {
           delete user.panels[text];
           await saveUser(user);
-          await sendMessage(chatId, `Marzban panel ${text} deleted! 🗑️`);
+          await sendMessage(chatId, `Marzban panel ${escapeMarkdown(text)} deleted! 🗑️`, "Markdown");
           await clearState(userId);
         }
       } else if (state.state.startsWith("change_panel_")) {
@@ -1154,7 +1175,7 @@ serve(async (req) => {
           }
           user.panels[text] = user.panels[name];
           delete user.panels[name];
-          await sendMessage(chatId, `Panel name changed to ${text}! ✅`);
+          await sendMessage(chatId, `Panel name changed to ${escapeMarkdown(text)}! ✅`, "Markdown");
         } else if (field === "id") {
           user.panels[name].sub_prefix = text;
           await sendMessage(chatId, "ID updated! ✅");
@@ -1215,7 +1236,7 @@ serve(async (req) => {
             last_username: null,
           });
           await saveUser(user);
-          await sendMessage(chatId, `Channel ${username} added! ✅`);
+          await sendMessage(chatId, `Channel ${escapeMarkdown(username)} added! ✅`, "Markdown");
           await clearState(userId);
         }
       } else if (state.state === "delete_channel") {
@@ -1229,7 +1250,7 @@ serve(async (req) => {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
-          await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
+          await sendMessage(chatId, `Channel ${escapeMarkdown(username)} deleted! 🗑️`, "Markdown");
           await clearState(userId);
         }
       } else if (state.state === "edit_time") {
@@ -1338,7 +1359,7 @@ serve(async (req) => {
             const utc5 = new Date(dt.getTime() + 5 * 3600 * 1000);
             expiryStr = utc5.toISOString().replace('T', ' ').slice(0, 19) + ' UTC+5';
           }
-          const profileText = `User Profile:\nID: \`${targetUser.id}\`\nName: ${targetUser.first_name}\nBalance: ${targetUser.balance || 0} ⭐️\nActive Plan: ${targetUser.activePlan}\nSubscribed Plan: ${targetUser.subscribedPlan}\nExpiry: ${expiryStr}\nPanels: ${Object.keys(targetUser.panels || {}).join(", ") || "None"}\nChannels: ${targetUser.channels?.map((c: any) => c.username).join(", ") || "None"}`;
+          const profileText = `User Profile:\nID: \`${targetUser.id}\`\nName: ${escapeMarkdown(targetUser.first_name)}\nBalance: ${targetUser.balance || 0} ⭐️\nActive Plan: ${escapeMarkdown(targetUser.activePlan)}\nSubscribed Plan: ${escapeMarkdown(targetUser.subscribedPlan)}\nExpiry: ${expiryStr}\nPanels: ${Object.keys(targetUser.panels || {}).map(escapeMarkdown).join(", ") || "None"}\nChannels: ${targetUser.channels?.map((c: any) => escapeMarkdown(c.username)).join(", ") || "None"}`;
           await sendMessage(chatId, profileText, "Markdown");
           await clearState(userId);
         } else if (state.state === "admin_modify_balance_id") {
