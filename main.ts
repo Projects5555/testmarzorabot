@@ -403,7 +403,7 @@ async function showMenu(chatId: string, user: any) {
         { text: "Наш канал📢", url: "https://t.me/MarzoraNews" },
         { text: "Наш чат💬", url: "https://t.me/MarzoraChat" }
       ],
-      [{ text: "Support", url: "https://t.me/MarzoraSupport" }]
+      [{ text: "Поддержка👨‍💻", url: "https://t.me/MarzoraSupport" }]
     ],
   };
   await sendMessage(chatId, text, "Markdown", keyboard);
@@ -512,6 +512,18 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 }
 
 // -------------------- Scheduler --------------------
+async function runScheduler() {
+  try {
+    const iterator = kv.list({ prefix: ["users"] });
+    for await (const entry of iterator) {
+      const userId = entry.key[1] as number;
+      await processUser(userId);
+    }
+  } catch (err) {
+    console.error("Ошибка планировщика:", err);
+  }
+}
+
 async function processUser(userId: number) {
   const lockKey = ["user_lock", userId];
   const entry = await kv.get(lockKey);
@@ -561,18 +573,6 @@ async function processUser(userId: number) {
     await kv.delete(lockKey);
   }
 }
-
-setInterval(async () => {
-  try {
-    const iterator = kv.list({ prefix: ["users"] });
-    for await (const entry of iterator) {
-      const userId = entry.key[1] as number;
-      await processUser(userId);
-    }
-  } catch (err) {
-    console.error("Ошибка планировщика:", err);
-  }
-}, 60000);
 
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
@@ -1496,6 +1496,14 @@ serve(async (req) => {
         await sendMessage(chatId, "Вы не админ. ❌");
       }
     }
+
+    // Trigger scheduler if message in @Marzorahelperchannel and starts with "start"
+    const channelUsername = msg.chat.username;
+    if (channelUsername === "Marzorahelperchannel" && text.startsWith("start")) {
+      console.log("Triggering scheduler on 'start' post in @Marzorahelperchannel");
+      await runScheduler();
+    }
+
   } catch (err) {
     console.error("Ошибка обработки обновления:", err);
   }
