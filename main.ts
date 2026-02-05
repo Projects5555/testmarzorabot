@@ -333,7 +333,6 @@ async function checkPlanExpiry(user: any) {
     user.expiry = null;
     resetSettings(user);
     await saveUser(user);
-    await updateActiveUsers(user);
     await sendMessage(user.id.toString(), `Your plan has expired! Reverted to Free. All settings reset to default. Please configure again. 📉`, "Markdown");
   }
   return user;
@@ -355,18 +354,6 @@ function resetSettings(user: any) {
     ch.last_username = null;
   }
   user.channels = channels;
-}
-
-async function updateActiveUsers(user: any) {
-  const hasSelected = user.channels.some((c: any) => c.selected);
-  let activeUsers = (await kv.get(["active_users"])).value || [];
-  const index = activeUsers.indexOf(user.id);
-  if (hasSelected) {
-    if (index === -1) activeUsers.push(user.id);
-  } else {
-    if (index > -1) activeUsers.splice(index, 1);
-  }
-  await kv.set(["active_users"], activeUsers);
 }
 
 // -------------------- Menu & Settings Helpers --------------------
@@ -541,6 +528,18 @@ async function processUser(userId: number) {
   }
 }
 
+setInterval(async () => {
+  try {
+    const iterator = kv.list({ prefix: ["users"] });
+    for await (const entry of iterator) {
+      const userId = entry.key[1] as number;
+      await processUser(userId);
+    }
+  } catch (err) {
+    console.error("Scheduler error:", err);
+  }
+}, 60000);
+
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
   if (!await isAdmin(ch.chatId, userId)) {
@@ -666,7 +665,6 @@ serve(async (req) => {
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
         await saveUser(user);
-        await updateActiveUsers(user);
         await answerCallbackQuery(cb.id);
         await showPricing(chatId, msgId, user);
       } else if (data.startsWith("confirm_buy:")) {
@@ -690,7 +688,6 @@ serve(async (req) => {
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
         await saveUser(user);
-        await updateActiveUsers(user);
         await answerCallbackQuery(cb.id, "Purchased!");
         await showMenu(chatId, user);
       } else if (data === "cancel_buy") {
@@ -834,7 +831,6 @@ serve(async (req) => {
         }
         user.channels = channels;
         await saveUser(user);
-        await updateActiveUsers(user);
         const text = "Select channels where bot will work! ✅";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: `${ch.username} ${ch.selected ? "✅" : ""}`, callback_data: `toggle_select:${ch.chatId}` }]) };
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
@@ -1219,7 +1215,6 @@ serve(async (req) => {
             last_username: null,
           });
           await saveUser(user);
-          await updateActiveUsers(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
           await clearState(userId);
         }
@@ -1234,7 +1229,6 @@ serve(async (req) => {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
-          await updateActiveUsers(user);
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
           await clearState(userId);
         }
@@ -1459,30 +1453,7 @@ serve(async (req) => {
       }
       return new Response("ok");
     }
-    if (msg.chat.type === 'channel' && msg.chat.username === 'Marzorahelperchannel' && text.toLowerCase() === 'start') {
-      const globalLockKey = ["global_lock"];
-      const entry = await kv.get(globalLockKey);
-      const now = Date.now();
-      if (entry.value && entry.value > now) {
-        return new Response("ok");
-      }
-      const ttl = 300000; // 5 minutes lock
-      const newLock = now + ttl;
-      const atomic = kv.atomic().check(entry).set(globalLockKey, newLock);
-      const res = await atomic.commit();
-      if (!res.ok) return new Response("ok");
-      try {
-        const activeUsers = (await kv.get(["active_users"])).value || [];
-        for (const uid of activeUsers) {
-          await processUser(uid);
-        }
-        await sendMessage(chatId, "Global processing completed! 🚀");
-      } catch (err) {
-        console.error("Global process error:", err);
-      } finally {
-        await kv.delete(globalLockKey);
-      }
-    } else if (text === "/start") {
+    if (text === "/start") {
       await showMenu(chatId, user);
     } else if (text === "/adminpanel") {
       if (username === "Masakoff") {
