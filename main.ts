@@ -478,6 +478,27 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 }
 
 // -------------------- Scheduler --------------------
+let pollingIntervalId: number | null = null;
+
+async function startPolling(intervalMinutes: number) {
+  if (pollingIntervalId) {
+    clearInterval(pollingIntervalId);
+  }
+  const ms = intervalMinutes * 60 * 1000;
+  pollingIntervalId = setInterval(async () => {
+    try {
+      const iterator = kv.list({ prefix: ["users"] });
+      for await (const entry of iterator) {
+        const userId = entry.key[1] as number;
+        await processUser(userId);
+      }
+    } catch (err) {
+      console.error("Scheduler error:", err);
+    }
+  }, ms);
+  await kv.set(["polling_interval"], intervalMinutes);
+}
+
 async function processUser(userId: number) {
   const lockKey = ["user_lock", userId];
   const entry = await kv.get(lockKey);
@@ -527,18 +548,6 @@ async function processUser(userId: number) {
     await kv.delete(lockKey);
   }
 }
-
-setInterval(async () => {
-  try {
-    const iterator = kv.list({ prefix: ["users"] });
-    for await (const entry of iterator) {
-      const userId = entry.key[1] as number;
-      await processUser(userId);
-    }
-  } catch (err) {
-    console.error("Scheduler error:", err);
-  }
-}, 60000);
 
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
@@ -598,6 +607,12 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   }
   ch.last_username = subData.username;
 }
+
+// -------------------- Start Polling on Startup --------------------
+const pollingEntry = await kv.get(["polling_interval"]);
+const defaultInterval = 1;
+const intervalMinutes = pollingEntry.value || defaultInterval;
+startPolling(intervalMinutes);
 
 // -------------------- Webhook Handler --------------------
 serve(async (req) => {
@@ -1461,6 +1476,19 @@ serve(async (req) => {
       } else {
         await sendMessage(chatId, "You are not admin. ❌");
       }
+    } else if (text.startsWith("/startpolling ")) {
+      if (username !== "Masakoff") {
+        await sendMessage(chatId, "You are not admin. ❌");
+        return new Response("ok");
+      }
+      const timeStr = text.slice(14).trim();
+      const minutes = parseInt(timeStr);
+      if (isNaN(minutes) || minutes <= 0) {
+        await sendMessage(chatId, "Invalid polling time. Must be positive integer in minutes. ❌");
+        return new Response("ok");
+      }
+      await startPolling(minutes);
+      await sendMessage(chatId, `Polling started every ${minutes} minutes! ✅`);
     }
   } catch (err) {
     console.error("Error handling update:", err);
