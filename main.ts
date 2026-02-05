@@ -354,6 +354,7 @@ function resetSettings(user: any) {
     ch.delete_before_posting = false;
     ch.last_username = null;
     ch.posting_config = 'subscription';
+    ch.encrypt = true;
   }
   user.channels = channels;
 }
@@ -572,16 +573,23 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   if (!subData) return;
   let happCodeStr = '';
   if (ch.posting_config === 'configs') {
-    const happCodes: string[] = [];
-    for (const link of subData.links) {
-      const happCode = await convertToHappCode(link);
-      if (happCode) happCodes.push(happCode);
+    let items: string[];
+    if (ch.encrypt) {
+      const happCodes = await Promise.all(subData.links.map(async (link: string) => await convertToHappCode(link)));
+      items = happCodes.filter((code): code is string => code !== null);
+    } else {
+      items = subData.links;
     }
-    happCodeStr = happCodes.join('\n');
+    happCodeStr = items.join('\n');
   } else {
-    const happCode = await convertToHappCode(subData.link);
-    if (!happCode) return;
-    happCodeStr = happCode;
+    let item: string | null;
+    if (ch.encrypt) {
+      item = await convertToHappCode(subData.link);
+    } else {
+      item = subData.link;
+    }
+    if (!item) return;
+    happCodeStr = item;
   }
   let postText = ch.template_text;
   let postEntities = ch.template_entities.map((e: any) => ({...e}));
@@ -876,6 +884,7 @@ serve(async (req) => {
         keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit Marzban User ⚙️", callback_data: `edit_marzban_user:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit posting config", callback_data: `edit_posting_config:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Edit encrypt", callback_data: `edit_encrypt:${ch.chatId}` }]);
         const timeText = planConfig.editTime ? "Editing time ⏰" : "🔒Editing time🔒";
         keyboard.inline_keyboard.push([{ text: timeText, callback_data: `edit_time:${ch.chatId}` }]);
         const postText = planConfig.editPost ? "Edit post ✏️" : "🔒Edit post🔒";
@@ -883,6 +892,33 @@ serve(async (req) => {
         const reactionText = planConfig.editReaction ? "Edit reaction ❤️" : "🔒Edit reaction🔒";
         keyboard.inline_keyboard.push([{ text: reactionText, callback_data: `edit_reaction:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_manage_channel" }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("edit_encrypt:")) {
+        const chatIdStr = data.slice(13);
+        const channels = user.channels || [];
+        const ch = channels.find((c: any) => c.chatId === chatIdStr);
+        if (!ch) return new Response("ok");
+        const encrypt = ch.encrypt !== false; // default true
+        const text = `Edit encrypt for ${ch.username} ⚙️`;
+        const keyboard = { inline_keyboard: [] };
+        keyboard.inline_keyboard.push([{ text: `Encrypt ${encrypt ? "✅" : ""}`, callback_data: `toggle_encrypt:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${ch.chatId}` }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("toggle_encrypt:")) {
+        const chatIdStr = data.slice(15);
+        const channels = user.channels || [];
+        const chIndex = channels.findIndex((c: any) => c.chatId === chatIdStr);
+        if (chIndex === -1) return new Response("ok");
+        channels[chIndex].encrypt = !channels[chIndex].encrypt;
+        user.channels = channels;
+        await saveUser(user);
+        await answerCallbackQuery(cb.id);
+        // Refresh edit encrypt menu
+        const encrypt = channels[chIndex].encrypt;
+        const text = `Edit encrypt for ${channels[chIndex].username} ⚙️`;
+        const keyboard = { inline_keyboard: [] };
+        keyboard.inline_keyboard.push([{ text: `Encrypt ${encrypt ? "✅" : ""}`, callback_data: `toggle_encrypt:${chatIdStr}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${chatIdStr}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("edit_posting_config:")) {
         const chatIdStr = data.slice(20);
@@ -1257,6 +1293,7 @@ serve(async (req) => {
             delete_before_posting: false,
             last_username: null,
             posting_config: 'subscription',
+            encrypt: true,
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
