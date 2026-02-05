@@ -9,7 +9,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 // -------------------- Telegram Setup --------------------
-const TOKEN = Deno.env.get("BOT_TOKEN");
+const TOKEN = "8476137691:AAE3TdIECgbF8E_57ZfgSIpd-EK-c0cw9W4"                                                                                          //Deno.env.get("BOT_TOKEN");
 if (!TOKEN) throw new Error("BOT_TOKEN not set");
 const API = `https://api.telegram.org/bot${TOKEN}`;
 
@@ -402,8 +402,7 @@ async function showMenu(chatId: string, user: any) {
       [
         { text: "Наш канал📢", url: "https://t.me/MarzoraNews" },
         { text: "Наш чат💬", url: "https://t.me/MarzoraChat" }
-      ],
-      [{ text: "Поддержка👨‍💻", url: "https://t.me/MarzoraSupport" }]
+      ]
     ],
   };
   await sendMessage(chatId, text, "Markdown", keyboard);
@@ -512,18 +511,6 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 }
 
 // -------------------- Scheduler --------------------
-async function runScheduler() {
-  try {
-    const iterator = kv.list({ prefix: ["users"] });
-    for await (const entry of iterator) {
-      const userId = entry.key[1] as number;
-      await processUser(userId);
-    }
-  } catch (err) {
-    console.error("Ошибка планировщика:", err);
-  }
-}
-
 async function processUser(userId: number) {
   const lockKey = ["user_lock", userId];
   const entry = await kv.get(lockKey);
@@ -573,6 +560,18 @@ async function processUser(userId: number) {
     await kv.delete(lockKey);
   }
 }
+
+setInterval(async () => {
+  try {
+    const iterator = kv.list({ prefix: ["users"] });
+    for await (const entry of iterator) {
+      const userId = entry.key[1] as number;
+      await processUser(userId);
+    }
+  } catch (err) {
+    console.error("Ошибка планировщика:", err);
+  }
+}, 60000);
 
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
@@ -1059,8 +1058,7 @@ serve(async (req) => {
         }
         const chatIdStr = data.slice(10);
         await setState(userId, "edit_post", { chatId: chatIdStr });
-        const exampleText = "Отправьте шаблон поста, используйте <happcode> для кода подписки: ✏️\n\nШаблон:\n<happcode>\n😎 Happ VPN\n\nБот отправит:\nhapp://crypt4/P/3ZKIsglP35hMo6k8Pnh4J68FFguJ+bvZK1b4Bx2hKnDPlgUTKazGNqHaNt+U9DoqFF7YnB7aajSdeNiF2cvUfs9Cn1d7lKvUJXdwgfqMfL3D6/XpS0hTH34fa6fMk6rslVZqtPZ8s5qIGzlUIw+B5GaZjY/lQ7G3Bxrmt2D+AI8kQ191ROASRP5Io/sqUv54lRwmcHvEQ5zx/OhvqOKgo3DzuoyvXy8GREkTlFaYzF1V4TAWIVhfPyXrewklFj4oW4fyiKaZSvLoQJWVPkfDF3aY2fBBa7B/USl9G8BoagQ58tRsmnW/ITAqU8SAFlrg2ynWbwnkSnbDX6GDTCNEbNF8SBw2Exk86sWitBfRM4gQKHwKgeJ06WOlUnyDgosjShVT86yp0KPzl1l2teYl7SalXF9AZ3lZQ2lfSMHSxX0hcWl4QyF9b2fe/XggXFyuei7YJE1ccSdiSnmsGTsFfEOnOb3KqQ2BJYpY41byfeAqykfRDrgmsaVBBsVuwrGmF+4X1H1p6aeC1CUTjAuC/QuFH8AENSyrFRILCRy23g79JlPsqrMcSB7CX4XXWZ5ow7AQJ51GKIc4htkoyB/bP40pLSbQKLgI7WLd2WpFUl6kl4Sqz7gnLTEF/srLqZXILhL8+cJkDYG2W4w0BUZXzXECNQbMfx1vxOvsYpRH8=\n😎 Happ VPN";
-        await editMessageText(chatId, msgId, exampleText, "Markdown");
+        await editMessageText(chatId, msgId, "Отправьте шаблон поста, используйте <happcode> для кода подписки: ✏️");
       } else if (data.startsWith("edit_reaction:")) {
         if (!planConfig.editReaction) {
           await answerCallbackQuery(cb.id, "Заблокировано для вашего плана 🔒");
@@ -1496,14 +1494,6 @@ serve(async (req) => {
         await sendMessage(chatId, "Вы не админ. ❌");
       }
     }
-
-    // Trigger scheduler if message in @Marzorahelperchannel and starts with "start"
-    const channelUsername = msg.chat.username;
-    if (channelUsername === "Marzorahelperchannel" && text.startsWith("start")) {
-      console.log("Triggering scheduler on 'start' post in @Marzorahelperchannel");
-      await runScheduler();
-    }
-
   } catch (err) {
     console.error("Ошибка обработки обновления:", err);
   }
