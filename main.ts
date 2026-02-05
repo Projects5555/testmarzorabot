@@ -359,6 +359,32 @@ function resetSettings(user: any) {
   user.channels = channels;
 }
 
+// -------------------- Active Users Helpers (KV optimization) --------------------
+async function getActiveUsers(): Promise<number[]> {
+  const users: number[] = [];
+  for await (const entry of kv.list({ prefix: ["active"] })) {
+    users.push(entry.key[1] as number);
+  }
+  return users;
+}
+
+async function addActiveUser(userId: number) {
+  await kv.set(["active", userId], true);
+}
+
+async function removeActiveUser(userId: number) {
+  await kv.delete(["active", userId]);
+}
+
+async function updateActiveStatus(user: any) {
+  const hasSelected = (user.channels || []).some((ch: any) => ch.selected === true);
+  if (hasSelected) {
+    await addActiveUser(user.id);
+  } else {
+    await removeActiveUser(user.id);
+  }
+}
+
 // -------------------- Menu & Settings Helpers --------------------
 async function showMenu(chatId: string, user: any) {
   user = await checkPlanExpiry(user);
@@ -480,7 +506,7 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
   }
 }
 
-// -------------------- Scheduler --------------------
+// -------------------- Scheduler (optimized) --------------------
 async function processUser(userId: number) {
   const lockKey = ["user_lock", userId];
   const entry = await kv.get(lockKey);
@@ -526,6 +552,8 @@ async function processUser(userId: number) {
       user.channels = channels;
       await saveUser(user);
     }
+    // Update active status (handles expirations, channel removals, etc.)
+    await updateActiveStatus(user);
   } finally {
     await kv.delete(lockKey);
   }
@@ -533,15 +561,14 @@ async function processUser(userId: number) {
 
 setInterval(async () => {
   try {
-    const iterator = kv.list({ prefix: ["users"] });
-    for await (const entry of iterator) {
-      const userId = entry.key[1] as number;
+    const activeIds = await getActiveUsers();
+    for (const userId of activeIds) {
       await processUser(userId);
     }
   } catch (err) {
     console.error("Scheduler error:", err);
   }
-}, 60000);
+}, 30000); // 30 seconds for tighter scheduling window
 
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
@@ -571,7 +598,6 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   }
   const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: ch.traffic_gb || 0 }, panel.sub_prefix, ch.protocols || ['vless', 'shadowsocks']);
   if (!subData) return;
-
   let happCodeStr = '';
   if (ch.posting_config === 'configs') {
     let items: string[];
@@ -592,44 +618,28 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     if (!item) return;
     happCodeStr = item;
   }
-
-  // -------------------- IMPROVED PLACEHOLDER REPLACEMENT --------------------
-  // Preserves custom_emoji_id and all other entity types when replacing <happcode>
   let postText = ch.template_text;
-  let postEntities = ch.template_entities.map((e: any) => ({ ...e })); // copy entities
-
+  let postEntities = ch.template_entities.map((e: any) => ({...e}));
   const placeholder = "<happcode>";
   const phLen = placeholder.length;
-  let searchOffset = 0;
-
+  let offset = 0;
   while (true) {
-    const pos = postText.indexOf(placeholder, searchOffset);
+    const pos = postText.indexOf(placeholder, offset);
     if (pos === -1) break;
-
-    const diff = happCodeStr.length - phLen;
-
-    // Create fresh entity objects with updated offsets/lengths
-    const adjustedEntities: any[] = postEntities.map((e: any) => {
-      const newE = { ...e };
-      if (newE.offset >= pos + phLen) {
-        newE.offset += diff;
-      } else if (newE.offset + newE.length > pos) {
-        newE.length += diff;
-      }
-      return newE;
-    });
-
-    postEntities = adjustedEntities;
-
-    // Replace placeholder in text
     postText = postText.slice(0, pos) + happCodeStr + postText.slice(pos + phLen);
-    searchOffset = pos + happCodeStr.length;
+    const diff = happCodeStr.length - phLen;
+    postEntities = postEntities.map((e: any) => {
+      if (e.offset >= pos + phLen) {
+        e.offset += diff;
+      } else if (e.offset + e.length > pos) {
+        e.length += diff;
+      }
+      return e;
+    });
+    offset = pos + happCodeStr.length;
   }
-  // -------------------- END IMPROVED REPLACEMENT --------------------
-
   if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
   if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
-
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
@@ -703,6 +713,7 @@ serve(async (req) => {
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
         await saveUser(user);
+        await updateActiveStatus(user); // KV optimization
         await answerCallbackQuery(cb.id);
         await showPricing(chatId, msgId, user);
       } else if (data.startsWith("confirm_buy:")) {
@@ -726,6 +737,7 @@ serve(async (req) => {
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
         await saveUser(user);
+        await updateActiveStatus(user); // KV optimization
         await answerCallbackQuery(cb.id, "Purchased!");
         await showMenu(chatId, user);
       } else if (data === "cancel_buy") {
@@ -869,6 +881,7 @@ serve(async (req) => {
         }
         user.channels = channels;
         await saveUser(user);
+        await updateActiveStatus(user); // KV optimization
         const text = "Select channels where bot will work! ✅";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: `${ch.username} ${ch.selected ? "✅" : ""}`, callback_data: `toggle_select:${ch.chatId}` }]) };
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
@@ -1313,6 +1326,7 @@ serve(async (req) => {
             encrypt: true,
           });
           await saveUser(user);
+          await updateActiveStatus(user); // KV optimization (usually no-op since default false)
           await sendMessage(chatId, `Channel ${username} added! ✅`);
           await clearState(userId);
         }
@@ -1327,6 +1341,7 @@ serve(async (req) => {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
+          await updateActiveStatus(user); // KV optimization
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
           await clearState(userId);
         }
