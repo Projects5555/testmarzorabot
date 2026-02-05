@@ -224,7 +224,7 @@ async function removeMarzbanUser(url: string, token: string, username: string): 
   }
 }
 
-async function createMarzbanUser(url: string, adminUser: string, adminPass: string, plan: any, sub_prefix: string, protocols: string[] = ['vless', 'shadowsocks']): Promise<{ link: string; expiryDate: string; username: string } | null> {
+async function createMarzbanUser(url: string, adminUser: string, adminPass: string, plan: any, sub_prefix: string, protocols: string[] = ['vless', 'shadowsocks']): Promise<{ link: string; expiryDate: string; username: string; links: string[] }> | null {
   const token = await getMarzbanToken(url, adminUser, adminPass);
   if (!token) return null;
   const username = sub_prefix + Math.random().toString(36).substring(2, 8);
@@ -280,7 +280,8 @@ async function createMarzbanUser(url: string, adminUser: string, adminPass: stri
     if (!relativeLink) return null;
     const fullLink = new URL(relativeLink, url).toString();
     const expiryDate = "Unlimited";
-    return { link: fullLink, expiryDate, username };
+    const links = data.links || [];
+    return { link: fullLink, expiryDate, username, links };
   } catch (err) {
     console.error("Failed to create/update Marzban user:", err);
     return null;
@@ -352,6 +353,7 @@ function resetSettings(user: any) {
     ch.traffic_gb = 0;
     ch.delete_before_posting = false;
     ch.last_username = null;
+    ch.posting_config = 'subscription';
   }
   user.channels = channels;
 }
@@ -478,27 +480,6 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
 }
 
 // -------------------- Scheduler --------------------
-let pollingIntervalId: number | null = null;
-
-async function startPolling(intervalMinutes: number) {
-  if (pollingIntervalId) {
-    clearInterval(pollingIntervalId);
-  }
-  const ms = intervalMinutes * 60 * 1000;
-  pollingIntervalId = setInterval(async () => {
-    try {
-      const iterator = kv.list({ prefix: ["users"] });
-      for await (const entry of iterator) {
-        const userId = entry.key[1] as number;
-        await processUser(userId);
-      }
-    } catch (err) {
-      console.error("Scheduler error:", err);
-    }
-  }, ms);
-  await kv.set(["polling_interval"], intervalMinutes);
-}
-
 async function processUser(userId: number) {
   const lockKey = ["user_lock", userId];
   const entry = await kv.get(lockKey);
@@ -549,6 +530,18 @@ async function processUser(userId: number) {
   }
 }
 
+setInterval(async () => {
+  try {
+    const iterator = kv.list({ prefix: ["users"] });
+    for await (const entry of iterator) {
+      const userId = entry.key[1] as number;
+      await processUser(userId);
+    }
+  } catch (err) {
+    console.error("Scheduler error:", err);
+  }
+}, 60000);
+
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
   if (!await isAdmin(ch.chatId, userId)) {
@@ -577,8 +570,19 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   }
   const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: ch.traffic_gb || 0 }, panel.sub_prefix, ch.protocols || ['vless', 'shadowsocks']);
   if (!subData) return;
-  const happCode = await convertToHappCode(subData.link);
-  if (!happCode) return;
+  let happCodeStr = '';
+  if (ch.posting_config === 'configs') {
+    const happCodes: string[] = [];
+    for (const link of subData.links) {
+      const happCode = await convertToHappCode(link);
+      if (happCode) happCodes.push(happCode);
+    }
+    happCodeStr = happCodes.join('\n');
+  } else {
+    const happCode = await convertToHappCode(subData.link);
+    if (!happCode) return;
+    happCodeStr = happCode;
+  }
   let postText = ch.template_text;
   let postEntities = ch.template_entities.map((e: any) => ({...e}));
   const placeholder = "<happcode>";
@@ -587,8 +591,8 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   while (true) {
     const pos = postText.indexOf(placeholder, offset);
     if (pos === -1) break;
-    postText = postText.slice(0, pos) + happCode + postText.slice(pos + phLen);
-    const diff = happCode.length - phLen;
+    postText = postText.slice(0, pos) + happCodeStr + postText.slice(pos + phLen);
+    const diff = happCodeStr.length - phLen;
     postEntities = postEntities.map((e: any) => {
       if (e.offset >= pos + phLen) {
         e.offset += diff;
@@ -597,7 +601,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
       }
       return e;
     });
-    offset = pos + happCode.length;
+    offset = pos + happCodeStr.length;
   }
   if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
   if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
@@ -607,12 +611,6 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   }
   ch.last_username = subData.username;
 }
-
-// -------------------- Start Polling on Startup --------------------
-const pollingEntry = await kv.get(["polling_interval"]);
-const defaultInterval = 1;
-const intervalMinutes = pollingEntry.value || defaultInterval;
-startPolling(intervalMinutes);
 
 // -------------------- Webhook Handler --------------------
 serve(async (req) => {
@@ -877,6 +875,7 @@ serve(async (req) => {
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit Marzban User ⚙️", callback_data: `edit_marzban_user:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Edit posting config", callback_data: `edit_posting_config:${ch.chatId}` }]);
         const timeText = planConfig.editTime ? "Editing time ⏰" : "🔒Editing time🔒";
         keyboard.inline_keyboard.push([{ text: timeText, callback_data: `edit_time:${ch.chatId}` }]);
         const postText = planConfig.editPost ? "Edit post ✏️" : "🔒Edit post🔒";
@@ -884,6 +883,35 @@ serve(async (req) => {
         const reactionText = planConfig.editReaction ? "Edit reaction ❤️" : "🔒Edit reaction🔒";
         keyboard.inline_keyboard.push([{ text: reactionText, callback_data: `edit_reaction:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_manage_channel" }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("edit_posting_config:")) {
+        const chatIdStr = data.slice(20);
+        const channels = user.channels || [];
+        const ch = channels.find((c: any) => c.chatId === chatIdStr);
+        if (!ch) return new Response("ok");
+        const postingConfig = ch.posting_config || 'subscription';
+        const text = `Edit posting config for ${ch.username} ⚙️`;
+        const keyboard = { inline_keyboard: [] };
+        keyboard.inline_keyboard.push([{ text: `Subscription Link ${postingConfig === 'subscription' ? "✅" : ""}`, callback_data: `set_posting_config:subscription:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: `Configs ${postingConfig === 'configs' ? "✅" : ""}`, callback_data: `set_posting_config:configs:${ch.chatId}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${ch.chatId}` }]);
+        await editMessageText(chatId, msgId, text, "Markdown", keyboard);
+      } else if (data.startsWith("set_posting_config:")) {
+        const parts = data.split(":");
+        const config = parts[1];
+        const chatIdStr = parts[2];
+        const channels = user.channels || [];
+        const chIndex = channels.findIndex((c: any) => c.chatId === chatIdStr);
+        if (chIndex === -1) return new Response("ok");
+        channels[chIndex].posting_config = config;
+        user.channels = channels;
+        await saveUser(user);
+        await answerCallbackQuery(cb.id, `Set to ${config}! ✅`);
+        const text = `Edit posting config for ${channels[chIndex].username} ⚙️`;
+        const keyboard = { inline_keyboard: [] };
+        keyboard.inline_keyboard.push([{ text: `Subscription Link ${config === 'subscription' ? "✅" : ""}`, callback_data: `set_posting_config:subscription:${chatIdStr}` }]);
+        keyboard.inline_keyboard.push([{ text: `Configs ${config === 'configs' ? "✅" : ""}`, callback_data: `set_posting_config:configs:${chatIdStr}` }]);
+        keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${chatIdStr}` }]);
         await editMessageText(chatId, msgId, text, "Markdown", keyboard);
       } else if (data.startsWith("edit_marzban_user:")) {
         const chatIdStr = data.slice(18);
@@ -1228,6 +1256,7 @@ serve(async (req) => {
             traffic_gb: 0,
             delete_before_posting: false,
             last_username: null,
+            posting_config: 'subscription',
           });
           await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
@@ -1476,19 +1505,6 @@ serve(async (req) => {
       } else {
         await sendMessage(chatId, "You are not admin. ❌");
       }
-    } else if (text.startsWith("/startpolling ")) {
-      if (username !== "Masakoff") {
-        await sendMessage(chatId, "You are not admin. ❌");
-        return new Response("ok");
-      }
-      const timeStr = text.slice(14).trim();
-      const minutes = parseInt(timeStr);
-      if (isNaN(minutes) || minutes <= 0) {
-        await sendMessage(chatId, "Invalid polling time. Must be positive integer in minutes. ❌");
-        return new Response("ok");
-      }
-      await startPolling(minutes);
-      await sendMessage(chatId, `Polling started every ${minutes} minutes! ✅`);
     }
   } catch (err) {
     console.error("Error handling update:", err);
