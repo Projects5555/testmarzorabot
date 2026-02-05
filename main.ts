@@ -571,6 +571,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
   }
   const subData = await createMarzbanUser(panel.url, panel.username, panel.password, { traffic_gb: ch.traffic_gb || 0 }, panel.sub_prefix, ch.protocols || ['vless', 'shadowsocks']);
   if (!subData) return;
+
   let happCodeStr = '';
   if (ch.posting_config === 'configs') {
     let items: string[];
@@ -591,28 +592,44 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     if (!item) return;
     happCodeStr = item;
   }
+
+  // -------------------- IMPROVED PLACEHOLDER REPLACEMENT --------------------
+  // Preserves custom_emoji_id and all other entity types when replacing <happcode>
   let postText = ch.template_text;
-  let postEntities = ch.template_entities.map((e: any) => ({...e}));
+  let postEntities = ch.template_entities.map((e: any) => ({ ...e })); // copy entities
+
   const placeholder = "<happcode>";
   const phLen = placeholder.length;
-  let offset = 0;
+  let searchOffset = 0;
+
   while (true) {
-    const pos = postText.indexOf(placeholder, offset);
+    const pos = postText.indexOf(placeholder, searchOffset);
     if (pos === -1) break;
-    postText = postText.slice(0, pos) + happCodeStr + postText.slice(pos + phLen);
+
     const diff = happCodeStr.length - phLen;
-    postEntities = postEntities.map((e: any) => {
-      if (e.offset >= pos + phLen) {
-        e.offset += diff;
-      } else if (e.offset + e.length > pos) {
-        e.length += diff;
+
+    // Create fresh entity objects with updated offsets/lengths
+    const adjustedEntities: any[] = postEntities.map((e: any) => {
+      const newE = { ...e };
+      if (newE.offset >= pos + phLen) {
+        newE.offset += diff;
+      } else if (newE.offset + newE.length > pos) {
+        newE.length += diff;
       }
-      return e;
+      return newE;
     });
-    offset = pos + happCodeStr.length;
+
+    postEntities = adjustedEntities;
+
+    // Replace placeholder in text
+    postText = postText.slice(0, pos) + happCodeStr + postText.slice(pos + phLen);
+    searchOffset = pos + happCodeStr.length;
   }
+  // -------------------- END IMPROVED REPLACEMENT --------------------
+
   if (!planConfig.noWatermark) postText += "\n\nPowered by Happ Bot 🚀";
   if (!planConfig.noAds) postText += "\nJoin @HappService for more! 📢";
+
   const sent = await sendMessage(ch.username, postText, null, null, postEntities);
   if (sent && ch.reaction && planConfig.editReaction) {
     await setReaction(ch.username, sent.message_id, ch.reaction);
