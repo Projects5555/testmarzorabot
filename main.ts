@@ -171,16 +171,9 @@ async function getChatMember(chatId: string, userId: number) {
 }
 
 async function isAdmin(chatId: string, userId: number) {
-  const cacheKey = ["admin_cache", chatId, userId];
-  const entry = await kv.get(cacheKey);
-  const now = Date.now();
-  if (entry.value && entry.value.expiry > now) {
-    return entry.value.isAdmin;
-  }
   const member = await getChatMember(chatId, userId);
-  const isAdminVal = !!member && ["administrator", "creator"].includes(member.status);
-  await kv.set(cacheKey, { isAdmin: isAdminVal, expiry: now + 3600000 }); // 1 hour TTL
-  return isAdminVal;
+  if (!member) return false;
+  return ["administrator", "creator"].includes(member.status);
 }
 
 async function setReaction(chatId: string, messageId: number, emoji: string) {
@@ -535,20 +528,17 @@ async function processUser(userId: number) {
   }
 }
 
-async function runScheduler() {
+setInterval(async () => {
   try {
     const iterator = kv.list({ prefix: ["users"] });
     for await (const entry of iterator) {
       const userId = entry.key[1] as number;
-      const userEntry = await kv.get(["users", userId]);
-      const user = userEntry.value;
-      if (!user || !user.channels?.some((ch: any) => ch.selected && ch.marzban)) continue; // Skip inactive users
       await processUser(userId);
     }
   } catch (err) {
     console.error("Scheduler error:", err);
   }
-}
+}, 60000);
 
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
@@ -645,7 +635,6 @@ serve(async (req) => {
       const activePlan = user.activePlan || "free";
       const subscribedPlan = user.subscribedPlan || "free";
       const planConfig = PLANS[activePlan];
-      let userChanged = false;
       if (data === "plan_info") {
         await answerCallbackQuery(cb.id, `You are in ${activePlan.charAt(0).toUpperCase() + activePlan.slice(1)} plan 📊`);
       } else if (data === "settings") {
@@ -671,11 +660,11 @@ serve(async (req) => {
         }
         const oldActive = activePlan;
         user.activePlan = newPlan;
-        userChanged = true;
         if (newPlan !== oldActive) {
           resetSettings(user);
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
+        await saveUser(user);
         await answerCallbackQuery(cb.id);
         await showPricing(chatId, msgId, user);
       } else if (data.startsWith("confirm_buy:")) {
@@ -694,11 +683,11 @@ serve(async (req) => {
         user.subscribedPlan = buyPlan;
         user.activePlan = buyPlan;
         user.expiry = Date.now() + 30 * 24 * 3600 * 1000;
-        userChanged = true;
         if (buyPlan !== oldActive) {
           resetSettings(user);
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
+        await saveUser(user);
         await answerCallbackQuery(cb.id, "Purchased!");
         await showMenu(chatId, user);
       } else if (data === "cancel_buy") {
@@ -841,7 +830,7 @@ serve(async (req) => {
           channels[chIndex].selected = true;
         }
         user.channels = channels;
-        userChanged = true;
+        await saveUser(user);
         const text = "Select channels where bot will work! ✅";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: `${ch.username} ${ch.selected ? "✅" : ""}`, callback_data: `toggle_select:${ch.chatId}` }]) };
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
@@ -922,8 +911,9 @@ serve(async (req) => {
         }
         channels[chIndex].protocols = protocols;
         user.channels = channels;
-        userChanged = true;
+        await saveUser(user);
         await answerCallbackQuery(cb.id);
+        // Refresh protocols menu
         const text = "Select protocols:";
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Vmess ${protocols.includes('vmess') ? "✅" : ""}`, callback_data: `toggle_protocol:vmess:${chatIdStr}` }]);
@@ -943,8 +933,9 @@ serve(async (req) => {
         if (chIndex === -1) return new Response("ok");
         channels[chIndex].delete_before_posting = !channels[chIndex].delete_before_posting;
         user.channels = channels;
-        userChanged = true;
+        await saveUser(user);
         await answerCallbackQuery(cb.id);
+        // Refresh edit marzban user menu
         const ch = channels[chIndex];
         const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
         const keyboard = { inline_keyboard: [] };
@@ -982,8 +973,9 @@ serve(async (req) => {
         if (chIndex === -1) return new Response("ok");
         channels[chIndex].marzban = "our_marzban";
         user.channels = channels;
-        userChanged = true;
+        await saveUser(user);
         await answerCallbackQuery(cb.id, "Connected to our Marzban! ✅");
+        // Refresh connect menu
         const text = "Select Marzban panel to connect to this channel! 🔗";
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Our marzban ✅`, callback_data: `connect_our:${chatIdStr}` }]);
@@ -1002,8 +994,9 @@ serve(async (req) => {
         if (chIndex === -1 || !user.panels[name]) return new Response("ok");
         channels[chIndex].marzban = name;
         user.channels = channels;
-        userChanged = true;
+        await saveUser(user);
         await answerCallbackQuery(cb.id, `Connected to ${name}! ✅`);
+        // Refresh
         const text = "Select Marzban panel to connect to this channel! 🔗";
         const keyboard = { inline_keyboard: [] };
         if (planConfig.integrateOur) {
@@ -1074,9 +1067,6 @@ serve(async (req) => {
           await answerCallbackQuery(cb.id);
         }
       }
-      if (userChanged) {
-        await saveUser(user);
-      }
       return new Response("ok");
     }
     const msg = update.message;
@@ -1087,7 +1077,7 @@ serve(async (req) => {
     const username = msg.from.username;
     let user = await getUser(userId);
     user.first_name = msg.from.first_name;
-    let userChanged = false;
+    await saveUser(user);
     const state = await getState(userId);
     if (state) {
       if (state.state === "top_up_amount") {
@@ -1133,7 +1123,7 @@ serve(async (req) => {
           return new Response("ok");
         }
         user.panels[name] = { sub_prefix, url, username, password: text };
-        userChanged = true;
+        await saveUser(user);
         await sendMessage(chatId, `Marzban panel ${name} added! ✅`);
         await clearState(userId);
       } else if (state.state === "delete_marzban") {
@@ -1143,7 +1133,7 @@ serve(async (req) => {
           await clearState(userId);
         } else {
           delete user.panels[text];
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, `Marzban panel ${text} deleted! 🗑️`);
           await clearState(userId);
         }
@@ -1178,7 +1168,7 @@ serve(async (req) => {
           user.panels[name].password = text;
           await sendMessage(chatId, "Password updated! ✅");
         }
-        userChanged = true;
+        await saveUser(user);
         await clearState(userId);
       } else if (state.state === "add_channel") {
         let username = text.startsWith("@") ? text : `@${text}`;
@@ -1224,7 +1214,7 @@ serve(async (req) => {
             delete_before_posting: false,
             last_username: null,
           });
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, `Channel ${username} added! ✅`);
           await clearState(userId);
         }
@@ -1238,7 +1228,7 @@ serve(async (req) => {
         } else {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
           await clearState(userId);
         }
@@ -1269,7 +1259,7 @@ serve(async (req) => {
         if (chIndex !== -1) {
           channels[chIndex].times = times;
           user.channels = channels;
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, "Posting times updated! ✅");
           await clearState(userId);
         } else {
@@ -1287,7 +1277,7 @@ serve(async (req) => {
           channels[chIndex].template_text = text;
           channels[chIndex].template_entities = msg.entities || [];
           user.channels = channels;
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, "Post template updated! ✅");
           await clearState(userId);
         } else {
@@ -1299,7 +1289,7 @@ serve(async (req) => {
         if (chIndex !== -1) {
           channels[chIndex].reaction = text;
           user.channels = channels;
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, "Reaction updated! ✅");
           await clearState(userId);
         } else {
@@ -1317,7 +1307,7 @@ serve(async (req) => {
         if (chIndex !== -1) {
           channels[chIndex].traffic_gb = limit;
           user.channels = channels;
-          userChanged = true;
+          await saveUser(user);
           await sendMessage(chatId, "Traffic limit updated! ✅");
           await clearState(userId);
         } else {
@@ -1461,9 +1451,6 @@ serve(async (req) => {
           await clearState(userId);
         }
       }
-      if (userChanged) {
-        await saveUser(user);
-      }
       return new Response("ok");
     }
     if (text === "/start") {
@@ -1474,12 +1461,6 @@ serve(async (req) => {
       } else {
         await sendMessage(chatId, "You are not admin. ❌");
       }
-    } else if (msg.chat.username === "Marzorahelperchannel" && text === "start") {
-      await runScheduler();
-      await sendMessage(chatId, "Scheduler run triggered! ✅");
-    }
-    if (userChanged) {
-      await saveUser(user);
     }
   } catch (err) {
     console.error("Error handling update:", err);
