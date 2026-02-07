@@ -359,32 +359,6 @@ function resetSettings(user: any) {
   user.channels = channels;
 }
 
-// -------------------- Active Users Helpers (KV optimization) --------------------
-async function getActiveUsers(): Promise<number[]> {
-  const users: number[] = [];
-  for await (const entry of kv.list({ prefix: ["active"] })) {
-    users.push(entry.key[1] as number);
-  }
-  return users;
-}
-
-async function addActiveUser(userId: number) {
-  await kv.set(["active", userId], true);
-}
-
-async function removeActiveUser(userId: number) {
-  await kv.delete(["active", userId]);
-}
-
-async function updateActiveStatus(user: any) {
-  const hasSelected = (user.channels || []).some((ch: any) => ch.selected === true);
-  if (hasSelected) {
-    await addActiveUser(user.id);
-  } else {
-    await removeActiveUser(user.id);
-  }
-}
-
 // -------------------- Menu & Settings Helpers --------------------
 async function showMenu(chatId: string, user: any) {
   user = await checkPlanExpiry(user);
@@ -506,7 +480,7 @@ async function showOurMarzbanManagement(chatId: string, msgId?: number) {
   }
 }
 
-// -------------------- Scheduler (optimized) --------------------
+// -------------------- Scheduler --------------------
 async function processUser(userId: number) {
   const lockKey = ["user_lock", userId];
   const entry = await kv.get(lockKey);
@@ -552,8 +526,6 @@ async function processUser(userId: number) {
       user.channels = channels;
       await saveUser(user);
     }
-    // Update active status (handles expirations, channel removals, etc.)
-    await updateActiveStatus(user);
   } finally {
     await kv.delete(lockKey);
   }
@@ -561,14 +533,15 @@ async function processUser(userId: number) {
 
 setInterval(async () => {
   try {
-    const activeIds = await getActiveUsers();
-    for (const userId of activeIds) {
+    const iterator = kv.list({ prefix: ["users"] });
+    for await (const entry of iterator) {
+      const userId = entry.key[1] as number;
       await processUser(userId);
     }
   } catch (err) {
     console.error("Scheduler error:", err);
   }
-}, 30000); // 30 seconds for tighter scheduling window
+}, 60000);
 
 async function postToChannel(userId: number, ch: any, planConfig: any, user: any) {
   const botIdLocal = await getBotId();
@@ -713,7 +686,6 @@ serve(async (req) => {
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
         await saveUser(user);
-        await updateActiveStatus(user); // KV optimization
         await answerCallbackQuery(cb.id);
         await showPricing(chatId, msgId, user);
       } else if (data.startsWith("confirm_buy:")) {
@@ -737,7 +709,6 @@ serve(async (req) => {
           await sendMessage(chatId, "All settings changed to default please change it one more time 🔄");
         }
         await saveUser(user);
-        await updateActiveStatus(user); // KV optimization
         await answerCallbackQuery(cb.id, "Purchased!");
         await showMenu(chatId, user);
       } else if (data === "cancel_buy") {
@@ -881,7 +852,6 @@ serve(async (req) => {
         }
         user.channels = channels;
         await saveUser(user);
-        await updateActiveStatus(user); // KV optimization
         const text = "Select channels where bot will work! ✅";
         const keyboard = { inline_keyboard: channels.map((ch: any) => [{ text: `${ch.username} ${ch.selected ? "✅" : ""}`, callback_data: `toggle_select:${ch.chatId}` }]) };
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: "back_channels" }]);
@@ -1326,7 +1296,6 @@ serve(async (req) => {
             encrypt: true,
           });
           await saveUser(user);
-          await updateActiveStatus(user); // KV optimization (usually no-op since default false)
           await sendMessage(chatId, `Channel ${username} added! ✅`);
           await clearState(userId);
         }
@@ -1341,7 +1310,6 @@ serve(async (req) => {
           user.channels = user.channels.filter((c: any) => c.username !== username);
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
-          await updateActiveStatus(user); // KV optimization
           await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
           await clearState(userId);
         }
