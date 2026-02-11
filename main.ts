@@ -883,7 +883,7 @@ serve(async (req) => {
         const channels = user.channels || [];
         const ch = channels.find((c: any) => c.chatId === chatIdStr);
         if (!ch) return new Response("ok");
-        const text = `Here you can change ${ch.username} settings! ⚙️`;
+        const text = `Here you can change ${escapeMd(ch.username)} settings! ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Connect Marzban 🔗", callback_data: `connect_marzban:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit Marzban User ⚙️", callback_data: `edit_marzban_user:${ch.chatId}` }]);
@@ -903,7 +903,7 @@ serve(async (req) => {
         const ch = channels.find((c: any) => c.chatId === chatIdStr);
         if (!ch) return new Response("ok");
         const encrypt = ch.encrypt !== false; // default true
-        const text = `Edit encrypt for ${ch.username} ⚙️`;
+        const text = `Edit encrypt for ${escapeMd(ch.username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Encrypt ${encrypt ? "✅" : ""}`, callback_data: `toggle_encrypt:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${ch.chatId}` }]);
@@ -919,7 +919,7 @@ serve(async (req) => {
         await answerCallbackQuery(cb.id);
         // Refresh edit encrypt menu
         const encrypt = channels[chIndex].encrypt;
-        const text = `Edit encrypt for ${channels[chIndex].username} ⚙️`;
+        const text = `Edit encrypt for ${escapeMd(channels[chIndex].username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Encrypt ${encrypt ? "✅" : ""}`, callback_data: `toggle_encrypt:${chatIdStr}` }]);
         keyboard.inline_keyboard.push([{ text: "Back", callback_data: `manage_ch:${chatIdStr}` }]);
@@ -930,7 +930,7 @@ serve(async (req) => {
         const ch = channels.find((c: any) => c.chatId === chatIdStr);
         if (!ch) return new Response("ok");
         const postingConfig = ch.posting_config || 'subscription';
-        const text = `Edit posting config for ${ch.username} ⚙️`;
+        const text = `Edit posting config for ${escapeMd(ch.username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Subscription Link ${postingConfig === 'subscription' ? "✅" : ""}`, callback_data: `set_posting_config:subscription:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: `Configs ${postingConfig === 'configs' ? "✅" : ""}`, callback_data: `set_posting_config:configs:${ch.chatId}` }]);
@@ -947,7 +947,7 @@ serve(async (req) => {
         user.channels = channels;
         await saveUser(user);
         await answerCallbackQuery(cb.id, `Set to ${config}! ✅`);
-        const text = `Edit posting config for ${channels[chIndex].username} ⚙️`;
+        const text = `Edit posting config for ${escapeMd(channels[chIndex].username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: `Subscription Link ${config === 'subscription' ? "✅" : ""}`, callback_data: `set_posting_config:subscription:${chatIdStr}` }]);
         keyboard.inline_keyboard.push([{ text: `Configs ${config === 'configs' ? "✅" : ""}`, callback_data: `set_posting_config:configs:${chatIdStr}` }]);
@@ -958,7 +958,7 @@ serve(async (req) => {
         const channels = user.channels || [];
         const ch = channels.find((c: any) => c.chatId === chatIdStr);
         if (!ch) return new Response("ok");
-        const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
+        const text = `Edit Marzban User settings for ${escapeMd(ch.username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Edit protocols", callback_data: `edit_protocols:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit traffic limit", callback_data: `edit_traffic:${ch.chatId}` }]);
@@ -1020,7 +1020,7 @@ serve(async (req) => {
         await answerCallbackQuery(cb.id);
         // Refresh edit marzban user menu
         const ch = channels[chIndex];
-        const text = `Edit Marzban User settings for ${ch.username} ⚙️`;
+        const text = `Edit Marzban User settings for ${escapeMd(ch.username)} ⚙️`;
         const keyboard = { inline_keyboard: [] };
         keyboard.inline_keyboard.push([{ text: "Edit protocols", callback_data: `edit_protocols:${ch.chatId}` }]);
         keyboard.inline_keyboard.push([{ text: "Edit traffic limit", callback_data: `edit_traffic:${ch.chatId}` }]);
