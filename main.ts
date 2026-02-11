@@ -1251,7 +1251,6 @@ serve(async (req) => {
         await clearState(userId);
       } else if (state.state === "add_channel") {
         let inputUsername = text.startsWith("@") ? text.slice(1) : text;
-        inputUsername = inputUsername.toLowerCase();
         const username = `@${inputUsername}`;
         const chatInfo = await getChat(username);
         if (!chatInfo) {
@@ -1304,15 +1303,14 @@ serve(async (req) => {
         }
       } else if (state.state === "delete_channel") {
         let inputUsername = text.startsWith("@") ? text.slice(1) : text;
-        inputUsername = inputUsername.toLowerCase();
         const username = `@${inputUsername}`;
         user.channels = user.channels || [];
-        const ch = user.channels.find((c: any) => c.username.toLowerCase() === username);
+        const ch = user.channels.find((c: any) => c.username.toLowerCase() === username.toLowerCase());
         if (!ch) {
           await sendMessage(chatId, "Channel not found. ❌");
           await clearState(userId);
         } else {
-          user.channels = user.channels.filter((c: any) => c.username.toLowerCase() !== username);
+          user.channels = user.channels.filter((c: any) => c.username.toLowerCase() !== username.toLowerCase());
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
           await sendMessage(chatId, `Channel ${ch.username} deleted! 🗑️`);
