@@ -558,7 +558,7 @@ async function postToChannel(userId: number, ch: any, planConfig: any, user: any
     return;
   }
   const chatInfo = await getChat(ch.chatId);
-  if (chatInfo && chatInfo.username !== ch.username) {
+  if (chatInfo && chatInfo.username !== ch.username.slice(1)) {
     ch.username = `@${chatInfo.username}`;
     await kv.set(["channel_owners", ch.chatId], userId);
   }
@@ -1250,7 +1250,9 @@ serve(async (req) => {
         await saveUser(user);
         await clearState(userId);
       } else if (state.state === "add_channel") {
-        let username = text.startsWith("@") ? text : `@${text}`;
+        let inputUsername = text.startsWith("@") ? text.slice(1) : text;
+        inputUsername = inputUsername.toLowerCase();
+        const username = `@${inputUsername}`;
         const chatInfo = await getChat(username);
         if (!chatInfo) {
           await sendMessage(chatId, "Invalid channel. ❌");
@@ -1277,10 +1279,11 @@ serve(async (req) => {
           await clearState(userId);
           return new Response("ok");
         } else {
+          const storedUsername = `@${chatInfo.username}`;
           const defaultTemplate = "<happcode>";
           user.channels.push({
             chatId: chChatId,
-            username,
+            username: storedUsername,
             marzban: null,
             times: ["10:00"],
             last_posted_at: 0,
@@ -1296,21 +1299,23 @@ serve(async (req) => {
             encrypt: true,
           });
           await saveUser(user);
-          await sendMessage(chatId, `Channel ${username} added! ✅`);
+          await sendMessage(chatId, `Channel ${storedUsername} added! ✅`);
           await clearState(userId);
         }
       } else if (state.state === "delete_channel") {
-        let username = text.startsWith("@") ? text : `@${text}`;
+        let inputUsername = text.startsWith("@") ? text.slice(1) : text;
+        inputUsername = inputUsername.toLowerCase();
+        const username = `@${inputUsername}`;
         user.channels = user.channels || [];
-        const ch = user.channels.find((c: any) => c.username === username);
+        const ch = user.channels.find((c: any) => c.username.toLowerCase() === username);
         if (!ch) {
           await sendMessage(chatId, "Channel not found. ❌");
           await clearState(userId);
         } else {
-          user.channels = user.channels.filter((c: any) => c.username !== username);
+          user.channels = user.channels.filter((c: any) => c.username.toLowerCase() !== username);
           await kv.delete(["channel_owners", ch.chatId]);
           await saveUser(user);
-          await sendMessage(chatId, `Channel ${username} deleted! 🗑️`);
+          await sendMessage(chatId, `Channel ${ch.username} deleted! 🗑️`);
           await clearState(userId);
         }
       } else if (state.state === "edit_time") {
